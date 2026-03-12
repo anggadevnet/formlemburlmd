@@ -4,7 +4,6 @@ from datetime import datetime, timedelta
 import io
 
 # --- DATABASE KARYAWAN & ATASAN ---
-# Format: "Nama" : "NIK"
 data_karyawan = {
     "ANGGA SEPTIAN CAHYA": "09244925",
     "AZIS SAEFUDIN": "09244926",
@@ -23,34 +22,32 @@ data_atasan = {
 st.set_page_config(page_title="Form Lembur LMD", page_icon="📄")
 
 # --- FUNGSI BANTUAN ---
-def format_tanggal_indonesia(tanggal_obj):
+def format_tanggal_satu(tanggal_obj):
+    # Helper buat format satu tanggal
     hari_list = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
     bulan_list = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", 
                   "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
-    
     hari = hari_list[tanggal_obj.weekday()]
-    tanggal = tanggal_obj.day
     bulan = bulan_list[tanggal_obj.month - 1]
-    tahun = tanggal_obj.year
-    
-    return f"{hari}, {tanggal} {bulan} {tahun}"
+    return f"{hari}, {tanggal_obj.day} {bulan} {tanggal_obj.year}"
+
+def format_tanggal_range(tanggal_mulai, tanggal_selesai):
+    # Format: Sabtu, 10 Januari 2026 - Sabtu, 10 Januari 2026
+    t1 = format_tanggal_satu(tanggal_mulai)
+    t2 = format_tanggal_satu(tanggal_selesai)
+    return f"{t1} - {t2}"
 
 def hitung_durasi(mulai_obj, selesai_obj):
     delta = datetime.combine(datetime.min, selesai_obj) - datetime.combine(datetime.min, mulai_obj)
-    
     if delta.total_seconds() < 0:
         delta = delta + timedelta(days=1)
-        
     total_jam = int(delta.total_seconds() // 3600)
     total_menit = int((delta.total_seconds() % 3600) // 60)
-    
     teks_jam = f"{total_jam} jam"
     if total_menit > 0:
         teks_jam += f" {total_menit} menit"
-        
     mulai_str = mulai_obj.strftime("%H:%M")
     selesai_str = selesai_obj.strftime("%H:%M")
-    
     return f"{mulai_str} - {selesai_str} , {teks_jam}"
 
 # --- TAMPILAN WEB ---
@@ -62,8 +59,6 @@ st.markdown("---")
 st.subheader("Data Karyawan")
 pilih_nama = st.selectbox("Pilih Nama Karyawan", list(data_karyawan.keys()))
 nik_otomatis = data_karyawan[pilih_nama]
-
-# Tampilkan NIK secara otomatis (Read Only)
 st.text_input("NIK (Otomatis)", value=nik_otomatis, disabled=True)
 
 # Bagian Pilih Atasan
@@ -79,11 +74,17 @@ st.subheader("Detail Lembur")
 col1, col2 = st.columns(2)
 
 with col1:
-    bagian = st.text_input("Bagian/Divisi")
-    tanggal = st.date_input("Tanggal Lembur", datetime.today())
-
+    # UBAH 1: Bagian jadi Dropdown
+    bagian = st.selectbox("Bagian/Divisi", ["IT Business Partner", "IT Infrastructure"])
+    
+    # UBAH 2: Tanggal jadi Range
+    st.write("**Periode Lembur:**")
+    tanggal_range = st.date_input("Pilih Rentang Tanggal", value=(datetime.today(), datetime.today()))
+    
 with col2:
-    lokasi = st.text_input("Lokasi Kerja")
+    # UBAH 3: Lokasi jadi Dropdown
+    lokasi = st.selectbox("Lokasi Kerja", ["Remote (Work From Home)", "Arcadia", "TB. Simatupang"])
+    
     jam_mulai = st.time_input("Jam Mulai", value=datetime.strptime("17:00", "%H:%M").time())
     jam_selesai = st.time_input("Jam Selesai", value=datetime.strptime("21:00", "%H:%M").time())
 
@@ -93,14 +94,23 @@ uraian = st.text_area("Uraian Tugas / Pelaksanaan Lembur", height=100)
 st.markdown("---")
 if st.button("Generate Surat Word", type="primary"):
     try:
+        # Validasi Tanggal Range
+        if isinstance(tanggal_range, tuple) and len(tanggal_range) == 2:
+            tgl_mulai = tanggal_range[0]
+            tgl_selesai = tanggal_range[1]
+        else:
+            # Kalau user cuma pilih 1 tanggal (kembali ke default)
+            tgl_mulai = tanggal_range
+            tgl_selesai = tanggal_range
+
         # Load Template
         doc = DocxTemplate("template_surat.docx")
         
         # Proses Data
-        tanggal_rapi = format_tanggal_indonesia(tanggal)
+        tanggal_rapi = format_tanggal_range(tgl_mulai, tgl_selesai)
         durasi_rapi = hitung_durasi(jam_mulai, jam_selesai)
         
-        # Siapkan Context (Variabel untuk Word)
+        # Context
         context = {
             'nama': pilih_nama,
             'nik': nik_otomatis,
@@ -109,11 +119,11 @@ if st.button("Generate Surat Word", type="primary"):
             'hari_tanggal': tanggal_rapi,
             'durasi': durasi_rapi,
             'pelaksanaan_lembur': uraian,
-            'namabos': pilih_atasan,    # Tambahan baru
-            'nikbos': nik_bos_otomatis  # Tambahan baru
+            'namabos': pilih_atasan,
+            'nikbos': nik_bos_otomatis
         }
         
-        # Render ke Word
+        # Render
         doc.render(context)
         
         # Simpan ke memory
@@ -121,7 +131,7 @@ if st.button("Generate Surat Word", type="primary"):
         doc.save(buffer)
         buffer.seek(0)
         
-        # Tombol Download
+        # Download
         st.success("Surat Berhasil Dibuat! 🎉")
         st.download_button(
             label="📥 Download Surat Lembur (.docx)",
@@ -133,4 +143,4 @@ if st.button("Generate Surat Word", type="primary"):
     except Exception as e:
         st.error(f"Error: {str(e)}")
 
-st.caption("Developed by Admin - Powered by Streamlit")
+st.caption("Developed by acg - Powered by Streamlit")
