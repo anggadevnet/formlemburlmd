@@ -1,5 +1,5 @@
 import streamlit as st
-from docxtpl import DocxTemplate
+from docxtpl import DocxTemplate, RichText # Tambahin RichText di sini
 from datetime import datetime, timedelta, timezone
 import io
 
@@ -30,7 +30,6 @@ def format_tanggal_satu(tanggal_obj):
     bulan = bulan_list[tanggal_obj.month - 1]
     return f"{hari}, {tanggal_obj.day} {bulan} {tanggal_obj.year}"
 
-# Fungsi format tanpa hari (Untuk Tgl ACC)
 def format_tanpa_hari(tanggal_obj):
     bulan_list = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", 
                   "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
@@ -109,12 +108,14 @@ if st.button("Generate Surat Word", type="primary"):
         tanggal_rapi = format_tanggal_range(tgl_mulai, tgl_selesai)
         durasi_rapi = hitung_durasi(jam_mulai, jam_selesai)
         
-        # --- PERBAIKAN TANGGAL ---
-        # Set Timezone ke WIB (UTC+7) biar sama kayak laptop kamu
+        # Set Timezone WIB
         wib_timezone = timezone(timedelta(hours=7))
         tanggal_hari_ini = datetime.now(wib_timezone)
-        
         tgl_acc_rapi = format_tanpa_hari(tanggal_hari_ini)
+        
+        # --- PROSES BOLD UNTUK URAIAN ---
+        # Kita bungkus teks uraian dengan RichText dan set bold=True
+        uraian_bold = RichText(uraian, bold=True)
         
         # Context
         context = {
@@ -124,7 +125,7 @@ if st.button("Generate Surat Word", type="primary"):
             'lokasi': lokasi,
             'hari_tanggal': tanggal_rapi,
             'durasi': durasi_rapi,
-            'pelaksanaan_lembur': uraian,
+            'pelaksanaan_lembur': uraian_bold, # Disini pakai yang bold
             'namabos': pilih_atasan,
             'nikbos': nik_bos_otomatis,
             'tglacc': tgl_acc_rapi
@@ -151,4 +152,3 @@ if st.button("Generate Surat Word", type="primary"):
         st.error(f"Error: {str(e)}")
 
 st.caption("Developed by Acg - Powered by Streamlit")
-
