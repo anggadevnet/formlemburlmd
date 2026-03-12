@@ -30,26 +30,12 @@ def format_tanggal_satu(tanggal_obj):
     bulan = bulan_list[tanggal_obj.month - 1]
     return f"{hari}, {tanggal_obj.day} {bulan} {tanggal_obj.year}"
 
-# FUNGSI BARU: Format Tanpa Hari (Untuk Tgl ACC)
+# Fungsi format tanpa hari (Untuk Tgl ACC)
 def format_tanpa_hari(tanggal_obj):
     bulan_list = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", 
                   "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
     bulan = bulan_list[tanggal_obj.month - 1]
     return f"{tanggal_obj.day} {bulan} {tanggal_obj.year}"
-
-# FUNGSI BARU: Cari Hari Jumat
-def get_tanggal_jumat():
-    today = datetime.today()
-    # 0=Senin, 4=Jumat, 6=Minggu
-    if today.weekday() < 4: # Senin - Kamis
-        # Cari Jumat di minggu ini
-        jumat = today + timedelta(days=(4 - today.weekday()))
-    elif today.weekday() == 4: # Jumat
-        jumat = today
-    else: # Sabtu - Minggu
-        # Cari Jumat di minggu depan
-        jumat = today + timedelta(days=(4 - today.weekday() + 7))
-    return jumat
 
 def format_tanggal_range(tanggal_mulai, tanggal_selesai):
     t1 = format_tanggal_satu(tanggal_mulai)
@@ -123,9 +109,9 @@ if st.button("Generate Surat Word", type="primary"):
         tanggal_rapi = format_tanggal_range(tgl_mulai, tgl_selesai)
         durasi_rapi = hitung_durasi(jam_mulai, jam_selesai)
         
-        # PROSES TGL ACC OTOMATIS (JUMAT)
-        tanggal_jumat = get_tanggal_jumat()
-        tgl_acc_rapi = format_tanpa_hari(tanggal_jumat)
+        # PROSES TGL ACC = TANGGAL HARI INI
+        tanggal_hari_ini = datetime.today()
+        tgl_acc_rapi = format_tanpa_hari(tanggal_hari_ini)
         
         # Context
         context = {
@@ -138,7 +124,7 @@ if st.button("Generate Surat Word", type="primary"):
             'pelaksanaan_lembur': uraian,
             'namabos': pilih_atasan,
             'nikbos': nik_bos_otomatis,
-            'tglacc': tgl_acc_rapi  # Tambahan baru
+            'tglacc': tgl_acc_rapi  # Ini tanggal download
         }
         
         # Render
@@ -151,8 +137,6 @@ if st.button("Generate Surat Word", type="primary"):
         
         # Download
         st.success("Surat Berhasil Dibuat! 🎉")
-        st.info(f"Tanggal ACC otomatis di-set ke hari Jumat: {tgl_acc_rapi}")
-        
         st.download_button(
             label="📥 Download Surat Lembur (.docx)",
             data=buffer,
@@ -163,4 +147,4 @@ if st.button("Generate Surat Word", type="primary"):
     except Exception as e:
         st.error(f"Error: {str(e)}")
 
-st.caption("Developed by Admin - Powered by Streamlit")
+st.caption("Developed by Acg - Powered by Streamlit")
