@@ -23,7 +23,6 @@ st.set_page_config(page_title="Form Lembur LMD", page_icon="📄")
 
 # --- FUNGSI BANTUAN ---
 def format_tanggal_satu(tanggal_obj):
-    # Helper buat format satu tanggal
     hari_list = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
     bulan_list = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", 
                   "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
@@ -31,8 +30,28 @@ def format_tanggal_satu(tanggal_obj):
     bulan = bulan_list[tanggal_obj.month - 1]
     return f"{hari}, {tanggal_obj.day} {bulan} {tanggal_obj.year}"
 
+# FUNGSI BARU: Format Tanpa Hari (Untuk Tgl ACC)
+def format_tanpa_hari(tanggal_obj):
+    bulan_list = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", 
+                  "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
+    bulan = bulan_list[tanggal_obj.month - 1]
+    return f"{tanggal_obj.day} {bulan} {tanggal_obj.year}"
+
+# FUNGSI BARU: Cari Hari Jumat
+def get_tanggal_jumat():
+    today = datetime.today()
+    # 0=Senin, 4=Jumat, 6=Minggu
+    if today.weekday() < 4: # Senin - Kamis
+        # Cari Jumat di minggu ini
+        jumat = today + timedelta(days=(4 - today.weekday()))
+    elif today.weekday() == 4: # Jumat
+        jumat = today
+    else: # Sabtu - Minggu
+        # Cari Jumat di minggu depan
+        jumat = today + timedelta(days=(4 - today.weekday() + 7))
+    return jumat
+
 def format_tanggal_range(tanggal_mulai, tanggal_selesai):
-    # Format: Sabtu, 10 Januari 2026 - Sabtu, 10 Januari 2026
     t1 = format_tanggal_satu(tanggal_mulai)
     t2 = format_tanggal_satu(tanggal_selesai)
     return f"{t1} - {t2}"
@@ -74,17 +93,12 @@ st.subheader("Detail Lembur")
 col1, col2 = st.columns(2)
 
 with col1:
-    # UBAH 1: Bagian jadi Dropdown
     bagian = st.selectbox("Bagian/Divisi", ["IT Business Partner", "IT Infrastructure"])
-    
-    # UBAH 2: Tanggal jadi Range
     st.write("**Periode Lembur:**")
     tanggal_range = st.date_input("Pilih Rentang Tanggal", value=(datetime.today(), datetime.today()))
     
 with col2:
-    # UBAH 3: Lokasi jadi Dropdown
     lokasi = st.selectbox("Lokasi Kerja", ["Remote (Work From Home)", "Arcadia", "TB. Simatupang"])
-    
     jam_mulai = st.time_input("Jam Mulai", value=datetime.strptime("17:00", "%H:%M").time())
     jam_selesai = st.time_input("Jam Selesai", value=datetime.strptime("21:00", "%H:%M").time())
 
@@ -99,7 +113,6 @@ if st.button("Generate Surat Word", type="primary"):
             tgl_mulai = tanggal_range[0]
             tgl_selesai = tanggal_range[1]
         else:
-            # Kalau user cuma pilih 1 tanggal (kembali ke default)
             tgl_mulai = tanggal_range
             tgl_selesai = tanggal_range
 
@@ -109,6 +122,10 @@ if st.button("Generate Surat Word", type="primary"):
         # Proses Data
         tanggal_rapi = format_tanggal_range(tgl_mulai, tgl_selesai)
         durasi_rapi = hitung_durasi(jam_mulai, jam_selesai)
+        
+        # PROSES TGL ACC OTOMATIS (JUMAT)
+        tanggal_jumat = get_tanggal_jumat()
+        tgl_acc_rapi = format_tanpa_hari(tanggal_jumat)
         
         # Context
         context = {
@@ -120,7 +137,8 @@ if st.button("Generate Surat Word", type="primary"):
             'durasi': durasi_rapi,
             'pelaksanaan_lembur': uraian,
             'namabos': pilih_atasan,
-            'nikbos': nik_bos_otomatis
+            'nikbos': nik_bos_otomatis,
+            'tglacc': tgl_acc_rapi  # Tambahan baru
         }
         
         # Render
@@ -133,6 +151,8 @@ if st.button("Generate Surat Word", type="primary"):
         
         # Download
         st.success("Surat Berhasil Dibuat! 🎉")
+        st.info(f"Tanggal ACC otomatis di-set ke hari Jumat: {tgl_acc_rapi}")
+        
         st.download_button(
             label="📥 Download Surat Lembur (.docx)",
             data=buffer,
@@ -143,4 +163,4 @@ if st.button("Generate Surat Word", type="primary"):
     except Exception as e:
         st.error(f"Error: {str(e)}")
 
-st.caption("Developed by acg - Powered by Streamlit")
+st.caption("Developed by Admin - Powered by Streamlit")
