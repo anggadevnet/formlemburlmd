@@ -150,4 +150,5 @@ if st.button("Generate Surat Word", type="primary"):
     except Exception as e:
         st.error(f"Error: {str(e)}")
 
-st.caption("Developed by Admin - Powered by Streamlit")
+st.caption("Developed by Acg - Powered by Streamlit")
+
