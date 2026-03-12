@@ -1,6 +1,6 @@
 import streamlit as st
 from docxtpl import DocxTemplate
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import io
 
 # --- DATABASE KARYAWAN & ATASAN ---
@@ -109,8 +109,11 @@ if st.button("Generate Surat Word", type="primary"):
         tanggal_rapi = format_tanggal_range(tgl_mulai, tgl_selesai)
         durasi_rapi = hitung_durasi(jam_mulai, jam_selesai)
         
-        # PROSES TGL ACC = TANGGAL HARI INI
-        tanggal_hari_ini = datetime.today()
+        # --- PERBAIKAN TANGGAL ---
+        # Set Timezone ke WIB (UTC+7) biar sama kayak laptop kamu
+        wib_timezone = timezone(timedelta(hours=7))
+        tanggal_hari_ini = datetime.now(wib_timezone)
+        
         tgl_acc_rapi = format_tanpa_hari(tanggal_hari_ini)
         
         # Context
@@ -124,7 +127,7 @@ if st.button("Generate Surat Word", type="primary"):
             'pelaksanaan_lembur': uraian,
             'namabos': pilih_atasan,
             'nikbos': nik_bos_otomatis,
-            'tglacc': tgl_acc_rapi  # Ini tanggal download
+            'tglacc': tgl_acc_rapi
         }
         
         # Render
@@ -147,4 +150,4 @@ if st.button("Generate Surat Word", type="primary"):
     except Exception as e:
         st.error(f"Error: {str(e)}")
 
-st.caption("Developed by Acg - Powered by Streamlit")
+st.caption("Developed by Admin - Powered by Streamlit")
