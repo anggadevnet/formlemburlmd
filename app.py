@@ -3,12 +3,16 @@ from docxtpl import DocxTemplate, RichText
 from datetime import datetime, timedelta, timezone
 import io
 import pandas as pd
-from io import StringIO
-from github import Github
+import os
 
-# --- KONFIGURASI HARD CODED (UNTUK TEST) ---
-GITHUB_TOKEN = "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"
-REPO_NAME = "anggadevnet/formlemburlmd"
+# --- CONFIG & DATABASE FILE ---
+DB_FILE = 'database_lembur.csv'
+DOCS_FOLDER = 'generated_docs'
+
+# --- SETUP FOLDER ---
+# Buat folder untuk nyimpen file hasil generate kalo belum ada
+if not os.path.exists(DOCS_FOLDER):
+    os.makedirs(DOCS_FOLDER)
 
 # --- DATABASE KARYAWAN & ATASAN ---
 data_karyawan = {
@@ -26,57 +30,28 @@ data_atasan = {
 }
 
 users_db = {
-    "admin": "admin123"
+    "admin": "admin123",
+    "hrd": "hrd123"
 }
 
-# --- GITHUB HELPER FUNCTIONS ---
-def get_github_repo():
-    try:
-        g = Github(GITHUB_TOKEN)
-        repo = g.get_repo(REPO_NAME)
-        return repo
-    except Exception as e:
-        st.error(f"Gagal koneksi GitHub: {e}")
-        return None
-
-def get_csv_data():
-    repo = get_github_repo()
-    if not repo: return pd.DataFrame()
-    
-    try:
-        contents = repo.get_contents("database.csv")
-        data = contents.decoded_content.decode("utf-8")
-        df = pd.read_csv(StringIO(data))
-        return df
-    except:
-        # Kalau file belum ada, bikin dataframe kosong
-        return pd.DataFrame(columns=[
+# --- FUNGSI DATABASE (CSV) ---
+def init_db():
+    if not os.path.exists(DB_FILE):
+        df = pd.DataFrame(columns=[
             "Timestamp", "Nama", "NIK", "Bagian", "Lokasi", 
-            "Periode_Lembur", "Total_Jam", "Uraian", "Atasan", "Tanggal_ACC", "Durasi_Text"
+            "Periode_Lembur", "Total_Jam", "Uraian", "Atasan", "FilePath"
         ])
+        df.to_csv(DB_FILE, index=False)
 
-def save_csv_data(df):
-    repo = get_github_repo()
-    if not repo: return False
-    
-    try:
-        csv_buffer = StringIO()
-        df.to_csv(csv_buffer, index=False)
-        new_content = csv_buffer.getvalue()
-        
-        # Cek apakah file sudah ada
-        try:
-            contents = repo.get_contents("database.csv")
-            # Kalau ada, Update
-            repo.update_file(contents.path, "Update database lembur", new_content, contents.sha)
-        except:
-            # Kalau belum ada, Create baru
-            repo.create_file("database.csv", "Create database lembur", new_content)
-            
-        return True
-    except Exception as e:
-        st.error(f"Gagal save ke GitHub: {e}")
-        return False
+def save_to_db(data):
+    df = pd.read_csv(DB_FILE)
+    new_df = pd.DataFrame([data])
+    df = pd.concat([df, new_df], ignore_index=True)
+    df.to_csv(DB_FILE, index=False)
+
+def load_db():
+    df = pd.read_csv(DB_FILE)
+    return df
 
 # --- FUNGSI BANTUAN ---
 def format_tanggal_satu(tanggal_obj):
@@ -99,7 +74,6 @@ def format_tanggal_range(tanggal_mulai, tanggal_selesai):
     return f"{t1} - {t2}"
 
 def hitung_durasi(mulai_obj, selesai_obj):
-    from datetime import datetime, timedelta
     delta = datetime.combine(datetime.min, selesai_obj) - datetime.combine(datetime.min, mulai_obj)
     if delta.total_seconds() < 0:
         delta = delta + timedelta(days=1)
@@ -111,29 +85,6 @@ def hitung_durasi(mulai_obj, selesai_obj):
     mulai_str = mulai_obj.strftime("%H:%M")
     selesai_str = selesai_obj.strftime("%H:%M")
     return f"{mulai_str} - {selesai_str} , {teks_jam}", total_jam
-
-def generate_word_file(data_row):
-    doc = DocxTemplate("template_surat.docx")
-    uraian_bold = RichText(data_row['Uraian'], bold=True)
-    
-    context = {
-        'nama': data_row['Nama'],
-        'nik': data_row['NIK'],
-        'bagian': data_row['Bagian'],
-        'lokasi': data_row['Lokasi'],
-        'hari_tanggal': data_row['Periode_Lembur'],
-        'durasi': data_row['Durasi_Text'], 
-        'pelaksanaan_lembur': uraian_bold,
-        'namabos': data_row['Atasan'],
-        'nikbos': data_atasan.get(data_row['Atasan'], ''),
-        'tglacc': data_row['Tanggal_ACC']
-    }
-    
-    doc.render(context)
-    buffer = io.BytesIO()
-    doc.save(buffer)
-    buffer.seek(0)
-    return buffer
 
 # --- HALAMAN LOGIN ---
 def show_login_page():
@@ -163,28 +114,31 @@ def show_login_page():
                 st.session_state.username = "Guest"
                 st.rerun()
 
-# --- HALAMAN GUEST ---
+# --- HALAMAN GUEST (UPDATED) ---
 def show_guest_view():
-    st.title("👥 Rekap Lembur")
+    st.title("👥 Rekap & Download Lembur")
     st.markdown("---")
     
-    df = get_csv_data()
+    df = load_db()
     
     if df.empty:
-        st.info("Belum ada data.")
+        st.info("Belum ada data lembur yang tercatat.")
         return
 
-    df['Timestamp'] = pd.to_datetime(df['Timestamp'], errors='coerce')
-    df = df.dropna(subset=['Timestamp'])
+    # Filter Data
+    df['Timestamp'] = pd.to_datetime(df['Timestamp'])
     df['Bulan'] = df['Timestamp'].dt.to_period('M').astype(str)
     
+    # Filter Bulan
     list_bulan = df['Bulan'].unique()
     pilih_bulan = st.selectbox("Pilih Bulan", list_bulan)
     
+    # Filter Nama
     df_filtered_month = df[df['Bulan'] == pilih_bulan]
     list_nama = df_filtered_month['Nama'].unique()
     pilih_nama = st.selectbox("Pilih Karyawan", ["Semua"] + list(list_nama))
 
+    # Apply Filter
     if pilih_nama == "Semua":
         df_show = df_filtered_month
     else:
@@ -192,9 +146,13 @@ def show_guest_view():
 
     st.markdown("---")
     
-    if not df_show.empty:
-        total_jam = df_show['Total_Jam'].astype(int).sum()
-        st.metric("Total Jam Lembur", f"{total_jam} Jam")
+    # Tampilkan Data & Tombol Download
+    if df_show.empty:
+        st.warning("Tidak ada data untuk filter ini.")
+    else:
+        # Summary
+        total_jam = df_show['Total_Jam'].sum()
+        st.metric(f"Total Jam Lembur", f"{total_jam} Jam")
         st.markdown("---")
 
         for i, row in df_show.iterrows():
@@ -202,23 +160,29 @@ def show_guest_view():
                 col_info, col_btn = st.columns([3, 1])
                 with col_info:
                     st.write(f"**{row['Nama']}** | {row['Periode_Lembur']}")
-                    st.caption(f"Durasi: {row['Total_Jam']} Jam")
+                    st.caption(f"Durasi: {row['Total_Jam']} Jam | Lokasi: {row['Lokasi']}")
                 
                 with col_btn:
-                    buffer = generate_word_file(row)
-                    st.download_button(
-                        label="📥 Download",
-                        data=buffer,
-                        file_name=f"Surat_Lembur_{row['Nama']}.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        key=f"guest_dl_{i}"
-                    )
+                    # Tombol Download File
+                    file_path = row['FilePath']
+                    if os.path.exists(file_path):
+                        with open(file_path, "rb") as fp:
+                            st.download_button(
+                                label="📥 Download",
+                                data=fp,
+                                file_name=os.path.basename(file_path),
+                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                key=f"dl_{i}"
+                            )
+                    else:
+                        st.warning("File hilang")
                 st.markdown("---")
 
 # --- HALAMAN ADMIN ---
 def show_admin_view():
     with st.sidebar:
         st.title(f"👋 Halo, {st.session_state.username}")
+        st.caption(f"Role: {st.session_state.role}")
         st.markdown("---")
         menu = st.radio("Navigation", ["Create Surat", "Dashboard", "Data & Hapus"])
         st.markdown("---")
@@ -233,9 +197,10 @@ def show_admin_view():
     elif menu == "Data & Hapus":
         show_data_management()
 
-# --- FORM CONTENT ---
+# --- SUB-MENU ADMIN: FORM (UPDATED TO SAVE FILE) ---
 def show_form_content():
     st.title("📄 Form Surat Tugas Lembur")
+    st.markdown("**PT. Lintas Media Danawa**")
     st.markdown("---")
 
     st.subheader("Data Karyawan")
@@ -245,7 +210,9 @@ def show_form_content():
 
     st.subheader("Data Atasan")
     pilih_atasan = st.selectbox("Pilih Atasan Penyetuju", list(data_atasan.keys()))
-    
+    nik_bos_otomatis = data_atasan[pilih_atasan]
+    st.text_input("NIK Atasan (Otomatis)", value=nik_bos_otomatis, disabled=True)
+
     st.markdown("---")
 
     st.subheader("Detail Lembur")
@@ -261,16 +228,20 @@ def show_form_content():
         jam_mulai = st.time_input("Jam Mulai", value=datetime.strptime("17:00", "%H:%M").time())
         jam_selesai = st.time_input("Jam Selesai", value=datetime.strptime("21:00", "%H:%M").time())
 
-    uraian = st.text_area("Uraian Tugas", height=100)
+    uraian = st.text_area("Uraian Tugas / Pelaksanaan Lembur", height=100)
 
     st.markdown("---")
-    if st.button("Simpan & Generate", type="primary"):
+    if st.button("Generate & Save", type="primary"):
         try:
-            if isinstance(tanggal_range, tuple):
-                tgl_mulai, tgl_selesai = tanggal_range[0], tanggal_range[1]
+            if isinstance(tanggal_range, tuple) and len(tanggal_range) == 2:
+                tgl_mulai = tanggal_range[0]
+                tgl_selesai = tanggal_range[1]
             else:
-                tgl_mulai, tgl_selesai = tanggal_range, tanggal_range
+                tgl_mulai = tanggal_range
+                tgl_selesai = tanggal_range
 
+            doc = DocxTemplate("template_surat.docx")
+            
             tanggal_rapi = format_tanggal_range(tgl_mulai, tgl_selesai)
             durasi_text, durasi_jam = hitung_durasi(jam_mulai, jam_selesai)
             
@@ -278,6 +249,33 @@ def show_form_content():
             tanggal_hari_ini = datetime.now(wib_timezone)
             tgl_acc_rapi = format_tanpa_hari(tanggal_hari_ini)
             
+            uraian_bold = RichText(uraian, bold=True)
+            
+            context = {
+                'nama': pilih_nama,
+                'nik': nik_otomatis,
+                'bagian': bagian,
+                'lokasi': lokasi,
+                'hari_tanggal': tanggal_rapi,
+                'durasi': durasi_text,
+                'pelaksanaan_lembur': uraian_bold,
+                'namabos': pilih_atasan,
+                'nikbos': nik_bos_otomatis,
+                'tglacc': tgl_acc_rapi
+            }
+            
+            doc.render(context)
+            
+            # --- SAVE TO FILE & DATABASE ---
+            # 1. Buat nama file unik
+            timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"SuratLembur_{pilih_nama.replace(' ', '_')}_{timestamp_str}.docx"
+            file_path = os.path.join(DOCS_FOLDER, filename)
+            
+            # 2. Simpan file fisik ke folder generated_docs
+            doc.save(file_path)
+            
+            # 3. Simpan info ke CSV
             data_simpan = {
                 "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "Nama": pilih_nama,
@@ -285,68 +283,118 @@ def show_form_content():
                 "Bagian": bagian,
                 "Lokasi": lokasi,
                 "Periode_Lembur": tanggal_rapi,
-                "Total_Jam": str(durasi_jam),
+                "Total_Jam": durasi_jam,
                 "Uraian": uraian,
                 "Atasan": pilih_atasan,
-                "Tanggal_ACC": tgl_acc_rapi,
-                "Durasi_Text": durasi_text
+                "FilePath": file_path
             }
-
-            df_old = get_csv_data()
-            df_new = pd.concat([df_old, pd.DataFrame([data_simpan])], ignore_index=True)
+            save_to_db(data_simpan)
             
-            if save_csv_data(df_new):
-                st.success("Data Tersimpan ke GitHub! 🎉")
-                buffer = generate_word_file(data_simpan)
-                st.download_button(
-                    label="📥 Download Surat Lembur (.docx)",
-                    data=buffer,
-                    file_name=f"Surat_Lembur_{pilih_nama}.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
-            else:
-                st.error("Gagal menyimpan data.")
+            # 4. Siapkan buffer untuk download langsung
+            buffer = io.BytesIO()
+            doc.save(buffer)
+            buffer.seek(0)
+            
+            st.success("Data Tersimpan & Surat Berhasil Dibuat! 🎉")
+            st.download_button(
+                label="📥 Download Surat Lembur (.docx)",
+                data=buffer,
+                file_name=filename,
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
             
         except Exception as e:
             st.error(f"Error: {str(e)}")
 
-# --- DASHBOARD ---
+# --- SUB-MENU ADMIN: DASHBOARD (UPDATED) ---
 def show_dashboard():
-    st.title("📊 Dashboard")
-    df = get_csv_data()
-    if df.empty: return
+    st.title("📊 Dashboard Rekap Lembur")
+    
+    df = load_db()
+    
+    if df.empty:
+        st.warning("Data masih kosong.")
+        return
 
-    df['Timestamp'] = pd.to_datetime(df['Timestamp'], errors='coerce')
+    # Filter Bulan
+    df['Timestamp'] = pd.to_datetime(df['Timestamp'])
     df['Bulan'] = df['Timestamp'].dt.to_period('M').astype(str)
     
     list_bulan = df['Bulan'].unique()
     pilih_bulan = st.selectbox("Pilih Bulan", list_bulan)
 
     df_filtered = df[df['Bulan'] == pilih_bulan]
-    st.metric("Total Jam Bulan Ini", f"{df_filtered['Total_Jam'].astype(int).sum()} Jam")
-    
+
+    st.markdown("---")
+    st.subheader("Rekap Per Karyawan")
+
+    # Group by Nama
     rekap = df_filtered.groupby('Nama')['Total_Jam'].sum().reset_index()
-    st.dataframe(rekap)
 
-# --- DATA MANAGEMENT ---
-def show_data_management():
-    st.title("⚙️ Manajemen Data")
-    df = get_csv_data()
-    st.dataframe(df)
-    
-    if not df.empty:
-        st.subheader("Hapus Data")
-        list_timestamp = df['Timestamp'].tolist()
-        selected_ts = st.selectbox("Pilih Data", list_timestamp)
+    # Tampilkan per nama
+    for i, row in rekap.iterrows():
+        col_nama, col_jam, col_aksi = st.columns([2, 1, 1])
+        col_nama.write(f"**{row['Nama']}**")
+        col_jam.metric("Jam", f"{row['Total_Jam']}")
+
+        # Tombol untuk lihat detail / download per orang
+        files_person = df_filtered[df_filtered['Nama'] == row['Nama']]
         
-        if st.button("Hapus Data Terpilih"):
-            df_new = df[df['Timestamp'] != selected_ts]
-            if save_csv_data(df_new):
-                st.success("Data berhasil dihapus!")
-                st.rerun()
+        with col_aksi:
+            # Buat tombol expand detail
+            with st.expander("Detail"):
+                for x, data_row in files_person.iterrows():
+                    st.write(f"Tgl: {data_row['Periode_Lembur']} ({data_row['Total_Jam']} Jam)")
+                    file_p = data_row['FilePath']
+                    if os.path.exists(file_p):
+                        with open(file_p, "rb") as fp:
+                            st.download_button(
+                                label="Download Surat",
+                                data=fp,
+                                file_name=os.path.basename(file_p),
+                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                key=f"dash_dl_{x}"
+                            )
+        
+        st.markdown("---")
 
-# --- MAIN ---
+# --- SUB-MENU ADMIN: DATA & HAPUS ---
+def show_data_management():
+    st.title("⚙️ Manajemen Data Lembur")
+    
+    df = load_db()
+    
+    if df.empty:
+        st.info("Tidak ada data.")
+        return
+
+    st.subheader("Data Lengkap")
+    st.dataframe(df, use_container_width=True)
+
+    st.markdown("---")
+    st.subheader("Hapus Data")
+    
+    list_timestamp = df['Timestamp'].tolist()
+    selected_ts = st.selectbox("Pilih Data (Waktu)", list_timestamp)
+
+    if st.button("Hapus Data Terpilih", type="secondary"):
+        # Ambil path file buat dihapus juga
+        file_to_delete = df[df['Timestamp'] == selected_ts]['FilePath'].values[0]
+        
+        if os.path.exists(file_to_delete):
+            os.remove(file_to_delete) # Hapus file fisik
+        
+        # Hapus dari CSV
+        df_baru = df[df['Timestamp'] != selected_ts]
+        df_baru.to_csv(DB_FILE, index=False)
+        
+        st.success("Data & File berhasil dihapus!")
+        st.rerun()
+
+# --- MAIN LOGIC ---
 def main():
+    init_db()
+    
     if 'logged_in' not in st.session_state:
         st.session_state.logged_in = False
 
@@ -355,7 +403,7 @@ def main():
     else:
         if st.session_state.role == "Admin":
             show_admin_view()
-        else:
+        elif st.session_state.role == "Guest":
             with st.sidebar:
                 st.title("Menu Guest")
                 if st.button("Logout"):
