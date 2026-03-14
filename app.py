@@ -8,7 +8,7 @@ from github import Github
 
 # --- KONFIGURASI HARD CODED (UNTUK TEST) ---
 GITHUB_TOKEN = "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"
-REPO_NAME = "anggadevnet/Streamlit-Lembur-Bot"
+REPO_NAME = "anggadevnet/formlemburlmd"
 
 # --- DATABASE KARYAWAN & ATASAN ---
 data_karyawan = {
