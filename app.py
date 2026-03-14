@@ -7,7 +7,7 @@ from io import StringIO
 from github import Github
 
 # --- KONFIGURASI HARD CODED (UNTUK TEST) ---
-GITHUB_TOKEN = "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"
+GITHUB_TOKEN = "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"
 REPO_NAME = "anggadevnet/Streamlit-Lembur-Bot"
 
 # --- DATABASE KARYAWAN & ATASAN ---
