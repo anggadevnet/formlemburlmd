@@ -7,7 +7,7 @@ from io import StringIO
 from github import Github
 
 # --- KONFIGURASI HARD CODED (UNTUK TEST) ---
-GITHUB_TOKEN = "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"
+GITHUB_TOKEN = "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"
 REPO_NAME = "anggadevnet/formlemburlmd"
 
 # --- DATABASE KARYAWAN & ATASAN ---
