@@ -6,6 +6,8 @@ import pandas as pd
 import os
 import tempfile
 import zipfile
+import subprocess
+import shutil
 
 # --- IMPORT PDF (VERSI AMAN) ---
 try:
@@ -101,7 +103,7 @@ def hitung_durasi(mulai_obj, selesai_obj):
     selesai_str = selesai_obj.strftime("%H:%M")
     return f"{mulai_str} - {selesai_str} , {teks_jam}", total_jam
 
-# --- FUNGSI FITUR TOOLS PDF (FIXED FOR LINUX/CLOUD) ---
+# --- FUNGSI FITUR TOOLS PDF (METODE LIBREOFFICE - 100% AKURAT) ---
 def show_pdf_tools():
     st.title("🛠️ Tools PDF & File")
     st.markdown("---")
@@ -113,7 +115,7 @@ def show_pdf_tools():
         st.subheader("Gabungkan File PDF")
         
         if not PDF_SUPPORT:
-            st.error("Library PDF (pypdf/PyPDF2) tidak ditemukan. Tambahkan 'pypdf' ke requirements.txt.")
+            st.error("Library PDF (pypdf/PyPDF2) tidak ditemukan.")
         else:
             uploaded_pdfs = st.file_uploader("Pilih beberapa file PDF", type="pdf", accept_multiple_files=True, key="merge_pdf_uploader")
             
@@ -140,68 +142,79 @@ def show_pdf_tools():
                     except Exception as e:
                         st.error(f"Terjadi error saat menggabungkan: {e}")
 
-    # --- TAB 2: WORD TO PDF (MENGGUNAKAN MAMMOTH + XHTML2PDF) ---
+    # --- TAB 2: WORD TO PDF (LIBREOFFICE ENGINE) ---
     with tab2:
         st.subheader("Convert Word ke PDF")
-        st.info("ℹ️ Fitur ini menggunakan converter alternatif (mammoth + xhtml2pdf). Pastikan file `packages.txt` sudah ada di repo.")
+        st.info("ℹ️ Menggunakan LibreOffice untuk hasil yang akurat sama dengan file asli.")
+        
+        # Cek apakah libreoffice terinstall
+        libreoffice_exists = shutil.which("libreoffice") or shutil.which("soffice")
+        
+        if not libreoffice_exists:
+            st.error("❌ LibreOffice tidak ditemukan di server.")
+            st.warning("Pastikan `packages.txt` berisi: `libreoffice-writer`")
         
         uploaded_docxs = st.file_uploader("Pilih file Word (.docx)", type="docx", accept_multiple_files=True, key="word_to_pdf_uploader")
         
         if uploaded_docxs:
             if st.button("Convert Semua ke PDF", type="primary"):
-                try:
-                    # Import library (Butuh packages.txt: libcairo2-dev pkg-config)
-                    import mammoth
-                    from xhtml2pdf import pisa
-                    
-                    zip_buffer = io.BytesIO()
-                    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-                        progress_bar = st.progress(0)
-                        status_text = st.empty()
+                if not libreoffice_exists:
+                    st.error("Gagal konversi: LibreOffice belum terinstall.")
+                else:
+                    try:
+                        zip_buffer = io.BytesIO()
+                        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                            progress_bar = st.progress(0)
+                            status_text = st.empty()
+                            
+                            with tempfile.TemporaryDirectory() as temp_dir:
+                                for i, docx_file in enumerate(uploaded_docxs):
+                                    status_text.text(f"Memproses file {i+1} dari {len(uploaded_docxs)}: {docx_file.name}")
+                                    
+                                    # 1. Simpan file docx ke folder sementara
+                                    base_name = os.path.splitext(docx_file.name)[0]
+                                    input_path = os.path.join(temp_dir, f"temp_{i}.docx")
+                                    
+                                    with open(input_path, "wb") as f:
+                                        f.write(docx_file.getbuffer())
+                                    
+                                    # 2. Jalankan perintah LibreOffice Headless
+                                    # Perintah ini akan convert semua file di folder tsb ke PDF
+                                    cmd = [
+                                        "libreoffice", "--headless", "--convert-to", "pdf",
+                                        "--outdir", temp_dir, input_path
+                                    ]
+                                    
+                                    # Jalankan subprocess
+                                    process = subprocess.run(cmd, capture_output=True, text=True)
+                                    
+                                    # 3. Cek hasilnya
+                                    output_pdf = os.path.join(temp_dir, f"temp_{i}.pdf")
+                                    
+                                    if os.path.exists(output_pdf):
+                                        with open(output_pdf, "rb") as pdf_file:
+                                            pdf_data = pdf_file.read()
+                                        zf.writestr(f"{base_name}.pdf", pdf_data)
+                                    else:
+                                        st.warning(f"Gagal konversi: {docx_file.name}")
+                                        if process.stderr:
+                                            st.caption(f"Error log: {process.stderr[:100]}")
+                                    
+                                    progress_bar.progress((i + 1) / len(uploaded_docxs))
+                                
+                                status_text.text("Selesai!")
                         
-                        for i, docx_file in enumerate(uploaded_docxs):
-                            status_text.text(f"Memproses file {i+1} dari {len(uploaded_docxs)}: {docx_file.name}")
-                            
-                            # 1. Baca DOCX jadi HTML
-                            result = mammoth.convert_to_html(docx_file)
-                            html_content = result.value
-                            
-                            # Styling dasar
-                            html_wrapped = f"""
-                            <html><head><style>
-                                body {{ font-family: Arial, sans-serif; font-size: 12px; }}
-                                table {{ border-collapse: collapse; width: 100%; }}
-                                td, th {{ border: 1px solid #000; padding: 5px; }}
-                            </style></head><body>{html_content}</body></html>
-                            """
-                            
-                            # 2. Convert HTML jadi PDF
-                            pdf_buffer = io.BytesIO()
-                            pisa_status = pisa.CreatePDF(html_wrapped, dest=pdf_buffer)
-                            
-                            if not pisa_status.err:
-                                base_name = os.path.splitext(docx_file.name)[0]
-                                zf.writestr(f"{base_name}.pdf", pdf_buffer.getvalue())
-                            else:
-                                st.warning(f"Gagal konversi: {docx_file.name}")
-                            
-                            progress_bar.progress((i + 1) / len(uploaded_docxs))
-                        status_text.text("Selesai!")
+                        zip_buffer.seek(0)
+                        st.success(f"Berhasil mengkonversi {len(uploaded_docxs)} file!")
+                        st.download_button(
+                            label="📥 Download Semua PDF (ZIP)",
+                            data=zip_buffer,
+                            file_name="converted_documents.zip",
+                            mime="application/zip"
+                        )
                     
-                    zip_buffer.seek(0)
-                    st.success(f"Berhasil mengkonversi {len(uploaded_docxs)} file!")
-                    st.download_button(
-                        label="📥 Download Semua PDF (ZIP)",
-                        data=zip_buffer,
-                        file_name="converted_documents.zip",
-                        mime="application/zip"
-                    )
-                
-                except ImportError as e:
-                    st.error(f"Library belum siap: {e}")
-                    st.warning("Pastikan `requirements.txt` berisi `mammoth` dan `xhtml2pdf`, serta `packages.txt` berisi `libcairo2-dev`.")
-                except Exception as e:
-                    st.error(f"Terjadi error: {str(e)}")
+                    except Exception as e:
+                        st.error(f"Terjadi error: {str(e)}")
 
 # --- FITUR KALKULATOR LEMBUR ---
 def show_overtime_calculator():
