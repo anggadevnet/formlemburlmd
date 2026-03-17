@@ -6,16 +6,20 @@ import pandas as pd
 import os
 import tempfile
 import zipfile
-# --- IMPORT PYTHONCOM DIHAPUS DARI SINI AGAR TIDAK CRASH SAAT STARTUP ---
+import sys
+import platform
 
-# --- IMPORT PDF (VERSI AMAN) ---
+# --- IMPORT PDF (DENGAN PENANGANAN ERROR) ---
+# Kita coba import, kalau gagal kita kasih tahu di halaman tools
 try:
     from pypdf import PdfReader, PdfWriter
+    PDF_SUPPORT = True
 except ImportError:
     try:
         from PyPDF2 import PdfReader, PdfWriter
+        PDF_SUPPORT = True
     except:
-        pass
+        PDF_SUPPORT = False
 
 # --- CONFIG & DATABASE FILE ---
 DB_FILE = 'database_lembur.csv'
@@ -26,7 +30,6 @@ if not os.path.exists(DOCS_FOLDER):
     os.makedirs(DOCS_FOLDER)
 
 # --- DATABASE KARYAWAN & ATASAN ---
-# Data NAFIRA NURZAHRA sudah ditambahkan
 data_karyawan = {
     "ANGGA SEPTIAN CAHYA": "09244925",
     "AZIS SAEFUDIN": "09244926",
@@ -101,7 +104,7 @@ def hitung_durasi(mulai_obj, selesai_obj):
     selesai_str = selesai_obj.strftime("%H:%M")
     return f"{mulai_str} - {selesai_str} , {teks_jam}", total_jam
 
-# --- FUNGSI FITUR TOOLS PDF (MODIFIED) ---
+# --- FUNGSI FITUR TOOLS PDF (FIXED FOR CLOUD) ---
 def show_pdf_tools():
     st.title("🛠️ Tools PDF & File")
     st.markdown("---")
@@ -111,117 +114,110 @@ def show_pdf_tools():
     # --- TAB 1: MERGE PDF ---
     with tab1:
         st.subheader("Gabungkan File PDF")
-        uploaded_pdfs = st.file_uploader("Pilih beberapa file PDF", type="pdf", accept_multiple_files=True, key="merge_pdf_uploader")
         
-        if uploaded_pdfs:
-            if st.button("Gabungkan PDF", type="primary"):
-                try:
-                    writer = PdfWriter()
-                    
-                    for pdf in uploaded_pdfs:
-                        reader = PdfReader(pdf)
-                        for page in reader.pages:
-                            writer.add_page(page)
-                    
-                    buffer = io.BytesIO()
-                    writer.write(buffer)
-                    buffer.seek(0)
-                    
-                    st.success(f"Berhasil menggabungkan {len(uploaded_pdfs)} file PDF!")
-                    st.download_button(
-                        label="📥 Download Hasil Gabungan",
-                        data=buffer,
-                        file_name="merged_document.pdf",
-                        mime="application/pdf"
-                    )
-                except Exception as e:
-                    st.error(f"Terjadi error saat menggabungkan: {e}")
-
-    # --- TAB 2: WORD TO PDF (BATCH CONVERT) ---
-    with tab2:
-        st.subheader("Convert Word ke PDF (Banyak File)")
-        st.info("Pilih satu atau banyak file Word (.docx) sekaligus. Hasilnya akan dijadikan satu file ZIP.")
-        st.warning("⚠️ Note: Fitur ini memerlukan environment Windows (MS Word). Jika error di Streamlit Cloud, gunakan fitur ini di komputer lokal.")
-        
-        uploaded_docxs = st.file_uploader("Pilih file Word (.docx)", type="docx", accept_multiple_files=True, key="word_to_pdf_uploader")
-        
-        if uploaded_docxs:
-            if st.button("Convert Semua ke PDF", type="primary"):
-                try:
-                    # --- PERBAIKAN: Import library di sini (Lazy Import) ---
-                    # Ini mencegah error saat app start, tapi akan error di sini jika di Linux
-                    import pythoncom 
-                    from docx2pdf import convert
-                    
-                    # Inisialisasi COM Library
-                    pythoncom.CoInitialize()
-                    
-                    # Siapkan buffer untuk ZIP
-                    zip_buffer = io.BytesIO()
-                    
-                    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-                        # Buat folder sementara untuk proses
-                        with tempfile.TemporaryDirectory() as temp_dir:
-                            progress_bar = st.progress(0)
-                            status_text = st.empty()
-                            
-                            for i, docx_file in enumerate(uploaded_docxs):
-                                # Update status
-                                status_text.text(f"Memproses file {i+1} dari {len(uploaded_docxs)}: {docx_file.name}")
-                                
-                                # Path sementara
-                                base_name = os.path.splitext(docx_file.name)[0]
-                                temp_docx_path = os.path.join(temp_dir, f"temp_{i}.docx")
-                                temp_pdf_path = os.path.join(temp_dir, f"temp_{i}.pdf")
-                                
-                                # Tulis file upload ke disk sementara
-                                with open(temp_docx_path, "wb") as f:
-                                    f.write(docx_file.getbuffer())
-                                
-                                # Convert (Butuh MS Word)
-                                convert(temp_docx_path, temp_pdf_path)
-                                
-                                # Baca hasil PDF dan masukkan ke ZIP
-                                if os.path.exists(temp_pdf_path):
-                                    with open(temp_pdf_path, "rb") as f:
-                                        pdf_data = f.read()
-                                    
-                                    # Nama file di dalam zip
-                                    pdf_name_in_zip = f"{base_name}.pdf"
-                                    zf.writestr(pdf_name_in_zip, pdf_data)
-                                else:
-                                    st.warning(f"Gagal konversi: {docx_file.name}")
-                                
-                                # Update progress bar
-                                progress_bar.progress((i + 1) / len(uploaded_docxs))
-                            
-                            status_text.text("Selesai!")
-                    
-                    # Selesai, siapkan download
-                    zip_buffer.seek(0)
-                    
-                    st.success(f"Berhasil mengkonversi {len(uploaded_docxs)} file!")
-                    st.download_button(
-                        label="📥 Download Semua PDF (ZIP)",
-                        data=zip_buffer,
-                        file_name="converted_documents.zip",
-                        mime="application/zip"
-                    )
-                        
-                except ImportError:
-                    st.error("Library 'docx2pdf' atau 'pythoncom' belum terinstall.")
-                    st.code("pip install docx2pdf pywin32")
-                    st.info("Note: Fitur ini membutuhkan Microsoft Word terinstall di komputer/server.")
-                except Exception as e:
-                    st.error(f"Gagal konversi (Kemungkinan server bukan Windows): {str(e)}")
-                finally:
-                    # Selalu uninitialize COM setelah selesai
+        # Cek dulu apakah library PDF ada
+        if not PDF_SUPPORT:
+            st.error("Library PDF (pypdf/PyPDF2) tidak ditemukan. Tambahkan 'pypdf' ke requirements.txt.")
+        else:
+            uploaded_pdfs = st.file_uploader("Pilih beberapa file PDF", type="pdf", accept_multiple_files=True, key="merge_pdf_uploader")
+            
+            if uploaded_pdfs:
+                if st.button("Gabungkan PDF", type="primary"):
                     try:
-                        import pythoncom
-                        pythoncom.CoUninitialize()
-                    except:
-                        pass
-                # ------------------------------------
+                        writer = PdfWriter()
+                        
+                        for pdf in uploaded_pdfs:
+                            reader = PdfReader(pdf)
+                            for page in reader.pages:
+                                writer.add_page(page)
+                        
+                        buffer = io.BytesIO()
+                        writer.write(buffer)
+                        buffer.seek(0)
+                        
+                        st.success(f"Berhasil menggabungkan {len(uploaded_pdfs)} file PDF!")
+                        st.download_button(
+                            label="📥 Download Hasil Gabungan",
+                            data=buffer,
+                            file_name="merged_document.pdf",
+                            mime="application/pdf"
+                        )
+                    except Exception as e:
+                        st.error(f"Terjadi error saat menggabungkan: {e}")
+
+    # --- TAB 2: WORD TO PDF ---
+    with tab2:
+        st.subheader("Convert Word ke PDF")
+        
+        # Deteksi Sistem Operasi
+        current_os = platform.system()
+        
+        # Jika di Linux (Streamlit Cloud), matikan fitur ini
+        if current_os == "Linux":
+            st.warning("⚠️ **Fitur ini tidak didukung di Streamlit Cloud.**")
+            st.info("Konversi Word ke PDF menggunakan `docx2pdf` membutuhkan Microsoft Word yang hanya ada di Windows. Silakan jalankan aplikasi ini di komputer lokal (localhost) untuk menggunakan fitur ini.")
+        
+        # Jika di Windows, jalankan fitur
+        else:
+            st.info("Pilih file Word (.docx). Fitur ini hanya berjalan di Windows Local.")
+            uploaded_docxs = st.file_uploader("Pilih file Word (.docx)", type="docx", accept_multiple_files=True, key="word_to_pdf_uploader")
+            
+            if uploaded_docxs:
+                if st.button("Convert Semua ke PDF", type="primary"):
+                    try:
+                        # Import hanya saat dibutuhkan dan di Windows
+                        import pythoncom 
+                        from docx2pdf import convert
+                        
+                        pythoncom.CoInitialize()
+                        
+                        zip_buffer = io.BytesIO()
+                        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                            with tempfile.TemporaryDirectory() as temp_dir:
+                                progress_bar = st.progress(0)
+                                status_text = st.empty()
+                                
+                                for i, docx_file in enumerate(uploaded_docxs):
+                                    status_text.text(f"Memproses file {i+1} dari {len(uploaded_docxs)}: {docx_file.name}")
+                                    
+                                    base_name = os.path.splitext(docx_file.name)[0]
+                                    temp_docx_path = os.path.join(temp_dir, f"temp_{i}.docx")
+                                    temp_pdf_path = os.path.join(temp_dir, f"temp_{i}.pdf")
+                                    
+                                    with open(temp_docx_path, "wb") as f:
+                                        f.write(docx_file.getbuffer())
+                                    
+                                    convert(temp_docx_path, temp_pdf_path)
+                                    
+                                    if os.path.exists(temp_pdf_path):
+                                        with open(temp_pdf_path, "rb") as f:
+                                            pdf_data = f.read()
+                                        zf.writestr(f"{base_name}.pdf", pdf_data)
+                                    else:
+                                        st.warning(f"Gagal konversi: {docx_file.name}")
+                                    
+                                    progress_bar.progress((i + 1) / len(uploaded_docxs))
+                                status_text.text("Selesai!")
+                        
+                        zip_buffer.seek(0)
+                        st.success(f"Berhasil mengkonversi {len(uploaded_docxs)} file!")
+                        st.download_button(
+                            label="📥 Download Semua PDF (ZIP)",
+                            data=zip_buffer,
+                            file_name="converted_documents.zip",
+                            mime="application/zip"
+                        )
+                            
+                    except ImportError:
+                        st.error("Library 'docx2pdf' belum terinstall. Jalankan: pip install docx2pdf")
+                    except Exception as e:
+                        st.error(f"Gagal konversi: {str(e)}")
+                    finally:
+                        try:
+                            import pythoncom
+                            pythoncom.CoUninitialize()
+                        except:
+                            pass
 
 # --- FITUR BARU: KALKULATOR LEMBUR ---
 def show_overtime_calculator():
@@ -234,17 +230,14 @@ def show_overtime_calculator():
     with col_date:
         tgl_lembur = st.date_input("Tanggal Lembur", value=date.today())
     with col_weekend:
-        # Checkbox untuk menandai weekend
         is_weekend = st.checkbox("Weekend / Holiday (CASE 4)", value=False)
 
     st.markdown("#### 🕒 Jadwal Shift (System)")
     col_sched1, col_sched2 = st.columns(2)
     with col_sched1:
-        # Default value dari JS: 08:30
         default_sched_in = datetime.strptime("08:30", "%H:%M").time()
         sched_in = st.time_input("Mulai Shift (System)", value=default_sched_in, disabled=is_weekend)
     with col_sched2:
-        # Default value dari JS: 17:30
         default_sched_out = datetime.strptime("17:30", "%H:%M").time()
         sched_out = st.time_input("Pulang Shift (System)", value=default_sched_out, disabled=is_weekend)
 
@@ -253,13 +246,9 @@ def show_overtime_calculator():
     with col_ot1:
         ot_in = st.time_input("Mulai Lembur", value=default_sched_out)
     with col_ot2:
-        # Default value dari JS: 15:00 (cuma contoh di JS, biarkan 20:00 biar masuk akal)
         ot_out = st.time_input("Selesai Lembur", value=datetime.strptime("20:00", "%H:%M").time())
 
     if st.button("Hitung Durasi (SUBMIT)", type="primary"):
-        # --- LOGIC PYTHON MIRIP JS ---
-        
-        # Helper: Combine date + time
         def combine_dt(t_obj):
             return datetime.combine(tgl_lembur, t_obj)
 
@@ -268,95 +257,60 @@ def show_overtime_calculator():
         dt_ot_in = combine_dt(ot_in)
         dt_ot_out = combine_dt(ot_out)
 
-        # Handle Midnight Crossing (Handle hari berikutnya)
         if dt_sched_out <= dt_sched_in:
             dt_sched_out += timedelta(days=1)
         
         if dt_ot_out <= dt_ot_in:
             dt_ot_out += timedelta(days=1)
 
-        # Variables to store results
         dur_before = timedelta()
         dur_after = timedelta()
         break_before = timedelta()
         break_after = timedelta()
         case_name = "UNKNOWN"
         
-        # Helper untuk format timedelta ke jam menit
         def format_td(td):
             total_sec = td.total_seconds()
             h = int(total_sec // 3600)
             m = int((total_sec % 3600) // 60)
             return f"{h} Jam {m} Menit"
 
-        # LOGIC CALCULATION
         if is_weekend:
             case_name = "CASE 4: Lembur di Hari Libur / Weekend"
-            
-            # Durasi mentah
             diff_raw = dt_ot_out - dt_ot_in
-            
-            # Di weekend, anggap semua jam adalah lembur (tanpa potongan)
-            # Di JS: durAfter = diffRaw (di display di kolom OT Duration)
-            dur_after = diff_raw # Kita masukkan ke dur_after biar muncul di hasil
-            
+            dur_after = diff_raw 
         else:
-            # WEEKDAY LOGIC
             if dt_ot_in < dt_sched_out:
-                # CASE 1: Lembur dimulai sebelum jam pulang system
                 case_name = f"CASE 1: Lembur Setelah Jam Kerja (Dimulai Sebelum {sched_out.strftime('%H:%M')})"
-                
-                # Durasi sebelum jam pulang (dari OT In sampai Jam Pulang System)
                 if dt_ot_in < dt_sched_out:
                     dur_before = dt_sched_out - dt_ot_in
-                
-                # Durasi setelah jam pulang (dari Jam Pulang System sampai OT Out)
                 if dt_ot_out > dt_sched_out:
                     dur_after = dt_ot_out - dt_sched_out
-                    
             elif dt_ot_in >= dt_sched_out:
-                # CASE 2 & 3
-                
-                # Deteksi Case 3 (Overnight / Besokannya)
-                # Di JS: jika jam selesai < jam masuk shift
                 if ot_out < sched_in:
                     case_name = "CASE 3: Lembur Sebelum Jam Kerja (Overnight)"
                 else:
                     case_name = f"CASE 2: Lembur Setelah Jam Kerja (Dimulai Setelah {sched_out.strftime('%H:%M')})"
-
-                # Durasi setelah jam pulang system
                 dur_after = dt_ot_out - dt_sched_out
-                
-                # Break setelah jam kerja (Gap antara pulang system s/d mulai lembur)
                 break_after = dt_ot_in - dt_sched_out
 
-        # --- FINAL CALCULATION ---
         total_duration = dur_before + dur_after - break_before - break_after
-        
-        # Handle negative total (jika error logic)
         if total_duration.total_seconds() < 0:
             total_duration = timedelta()
 
-        # --- DISPLAY RESULTS ---
         st.markdown("---")
         st.subheader("📊 Hasil Perhitungan")
-        
-        # Create Columns for Layout
         col_res1, col_res2 = st.columns(2)
-        
         with col_res1:
             if not is_weekend:
                 st.metric("Overtime Before Duration", format_td(dur_before))
                 st.metric("Break Before Duration", format_td(break_before))
             else:
-                # Weekend Display
                 st.info(f"Schedule In: **{ot_in.strftime('%H:%M')}** | Schedule Out: **{ot_out.strftime('%H:%M')}**")
-            
         with col_res2:
             st.metric("Overtime After Duration", format_td(dur_after))
             if not is_weekend:
                 st.metric("Break After Duration", format_td(break_after))
-        
         st.markdown("---")
         st.success(f"**TOTAL LEMBUR: {format_td(total_duration)}**")
         st.caption(f"Kategori: {case_name}")
@@ -365,12 +319,10 @@ def show_overtime_calculator():
 def show_login_page():
     st.title("🔒 Login Sistem Lembur")
     st.markdown("---")
-    
     col1, col2, col3 = st.columns([1,2,1])
     with col2:
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
-        
         col_btn1, col_btn2 = st.columns(2)
         with col_btn1:
             if st.button("Login Admin", use_container_width=True):
@@ -381,7 +333,6 @@ def show_login_page():
                     st.rerun()
                 else:
                     st.error("Username atau Password salah!")
-        
         with col_btn2:
             if st.button("Login as Guest", use_container_width=True):
                 st.session_state.logged_in = True
@@ -393,19 +344,15 @@ def show_login_page():
 def show_guest_view():
     st.title("👥 Rekap & Download Lembur")
     st.markdown("---")
-    
     df = load_db()
-    
     if df.empty:
         st.info("Belum ada data lembur yang tercatat.")
         return
 
     df['Timestamp'] = pd.to_datetime(df['Timestamp'])
     df['Bulan'] = df['Timestamp'].dt.to_period('M').astype(str)
-    
     list_bulan = df['Bulan'].unique()
     pilih_bulan = st.selectbox("Pilih Bulan", list_bulan)
-    
     df_filtered_month = df[df['Bulan'] == pilih_bulan]
     list_nama = df_filtered_month['Nama'].unique()
     pilih_nama = st.selectbox("Pilih Karyawan", ["Semua"] + list(list_nama))
@@ -416,19 +363,16 @@ def show_guest_view():
         df_show = df_filtered_month[df_filtered_month['Nama'] == pilih_nama]
 
     st.markdown("---")
-    
     if not df_show.empty:
         total_jam = df_show['Total_Jam'].sum()
         st.metric(f"Total Jam Lembur", f"{total_jam} Jam")
         st.markdown("---")
-
         for i, row in df_show.iterrows():
             with st.container():
                 col_info, col_btn = st.columns([3, 1])
                 with col_info:
                     st.write(f"**{row['Nama']}** | {row['Periode_Lembur']}")
                     st.caption(f"Durasi: {row['Total_Jam']} Jam | Lokasi: {row['Lokasi']}")
-                
                 with col_btn:
                     file_path = row['FilePath']
                     if os.path.exists(file_path):
@@ -452,7 +396,6 @@ def show_admin_view():
         st.title(f"👋 Halo, {st.session_state.username}")
         st.caption(f"Role: {st.session_state.role}")
         st.markdown("---")
-        # TAMBAHAN MENU: "Kalkulator Lembur"
         menu = st.radio("Navigation", ["Create Surat", "Dashboard", "Data & Hapus", "Tools PDF", "Kalkulator Lembur"])
         st.markdown("---")
         if st.button("Logout"):
@@ -495,7 +438,6 @@ def show_form_content():
         bagian = st.selectbox("Bagian/Divisi", ["IT Business Partner", "IT Infrastructure"])
         st.write("**Periode Lembur:**")
         tanggal_range = st.date_input("Pilih Rentang Tanggal", value=(datetime.today(), datetime.today()))
-        
     with col2:
         lokasi = st.selectbox("Lokasi Kerja", ["Remote (Work From Home)", "Arcadia", "TB. Simatupang"])
         jam_mulai = st.time_input("Jam Mulai", value=datetime.strptime("17:00", "%H:%M").time())
@@ -514,14 +456,12 @@ def show_form_content():
                 tgl_selesai = tanggal_range
 
             doc = DocxTemplate("template_surat.docx")
-            
             tanggal_rapi = format_tanggal_range(tgl_mulai, tgl_selesai)
             durasi_text, durasi_jam = hitung_durasi(jam_mulai, jam_selesai)
             
             wib_timezone = timezone(timedelta(hours=7))
             tanggal_hari_ini = datetime.now(wib_timezone)
             tgl_acc_rapi = format_tanpa_hari(tanggal_hari_ini)
-            
             uraian_bold = RichText(uraian, bold=True)
             
             context = {
@@ -538,11 +478,9 @@ def show_form_content():
             }
             
             doc.render(context)
-            
             timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"SuratLembur_{pilih_nama.replace(' ', '_')}_{timestamp_str}.docx"
             file_path = os.path.join(DOCS_FOLDER, filename)
-            
             doc.save(file_path)
             
             data_simpan = {
@@ -570,41 +508,31 @@ def show_form_content():
                 file_name=filename,
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             )
-            
         except Exception as e:
             st.error(f"Error: {str(e)}")
 
 # --- SUB-MENU ADMIN: DASHBOARD ---
 def show_dashboard():
     st.title("📊 Dashboard Rekap Lembur")
-    
     df = load_db()
-    
     if df.empty:
         st.warning("Data masih kosong.")
         return
 
     df['Timestamp'] = pd.to_datetime(df['Timestamp'])
     df['Bulan'] = df['Timestamp'].dt.to_period('M').astype(str)
-    
     list_bulan = df['Bulan'].unique()
     pilih_bulan = st.selectbox("Pilih Bulan", list_bulan)
-
     df_filtered = df[df['Bulan'] == pilih_bulan]
-
     st.markdown("---")
     st.subheader("Rekap Per Karyawan")
-
     rekap = df_filtered.groupby('Nama')['Total_Jam'].sum().reset_index()
 
     for i, row in rekap.iterrows():
         col_nama, col_jam, col_aksi = st.columns([2, 1, 1])
         col_nama.write(f"**{row['Nama']}**")
         col_jam.metric("Jam", f"{row['Total_Jam']}")
-
-        # --- PERBAIKAN: row['Nome'] -> row['Nama'] ---
         files_person = df_filtered[df_filtered['Nama'] == row['Nama']]
-        
         with col_aksi:
             with st.expander("Detail"):
                 if not files_person.empty:
@@ -620,44 +548,33 @@ def show_dashboard():
                                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                                     key=f"dash_dl_{x}"
                                 )
-        
         st.markdown("---")
 
 # --- SUB-MENU ADMIN: DATA & HAPUS ---
 def show_data_management():
     st.title("⚙️ Manajemen Data Lembur")
-    
     df = load_db()
-    
     if df.empty:
         st.info("Tidak ada data.")
         return
-
     st.subheader("Data Lengkap")
     st.dataframe(df, use_container_width=True)
-
     st.markdown("---")
     st.subheader("Hapus Data")
-    
     list_timestamp = df['Timestamp'].tolist()
     selected_ts = st.selectbox("Pilih Data (Waktu)", list_timestamp)
-
     if st.button("Hapus Data Terpilih", type="secondary"):
         file_to_delete = df[df['Timestamp'] == selected_ts]['FilePath'].values[0]
-        
         if os.path.exists(file_to_delete):
             os.remove(file_to_delete)
-        
         df_baru = df[df['Timestamp'] != selected_ts]
         df_baru.to_csv(DB_FILE, index=False)
-        
         st.success("Data & File berhasil dihapus!")
         st.rerun()
 
 # --- MAIN LOGIC ---
 def main():
     init_db()
-    
     if 'logged_in' not in st.session_state:
         st.session_state.logged_in = False
 
@@ -669,7 +586,6 @@ def main():
         elif st.session_state.role == "Guest":
             with st.sidebar:
                 st.title("Menu Guest")
-                # TAMBAHAN MENU: "Kalkulator Lembur"
                 guest_menu = st.radio("Navigation", ["Rekap Lembur", "Tools PDF", "Kalkulator Lembur"])
                 st.markdown("---")
                 if st.button("Logout"):
