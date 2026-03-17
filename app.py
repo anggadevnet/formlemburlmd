@@ -32,8 +32,7 @@ data_karyawan = {
     "NADINE PUSPITA SARI": "09244924",
     "MOCH DIKI RAMDANI": "09244923",
     "MOHAMMAD SYAIFUL ICHSAN": "09244931",
-    "MUKHLIS": "09244929",
-    "NAFIRA NURZAHRA": "09244914"
+    "MUKHLIS": "09244929"
 }
 
 data_atasan = {
