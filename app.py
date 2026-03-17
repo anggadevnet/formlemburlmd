@@ -1,6 +1,6 @@
 import streamlit as st
 from docxtpl import DocxTemplate, RichText
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, time, date
 import io
 import pandas as pd
 import os
@@ -32,7 +32,8 @@ data_karyawan = {
     "NADINE PUSPITA SARI": "09244924",
     "MOCH DIKI RAMDANI": "09244923",
     "MOHAMMAD SYAIFUL ICHSAN": "09244931",
-    "MUKHLIS": "09244929"
+    "MUKHLIS": "09244929",
+    "NAFIRA NURZAHRA": "09244914"
 }
 
 data_atasan = {
@@ -215,6 +216,144 @@ def show_pdf_tools():
                     pythoncom.CoUninitialize()
                 # ------------------------------------
 
+# --- FITUR BARU: KALKULATOR LEMBUR ---
+def show_overtime_calculator():
+    st.title("⏱️ Kalkulator Durasi Lembur")
+    st.markdown("---")
+    st.markdown("Isi data dibawah ini untuk menghitung durasi lembur otomatis mengikuti guide logic.")
+    
+    # --- INPUTS ---
+    col_date, col_weekend = st.columns([2, 1])
+    with col_date:
+        tgl_lembur = st.date_input("Tanggal Lembur", value=date.today())
+    with col_weekend:
+        # Checkbox untuk menandai weekend
+        is_weekend = st.checkbox("Weekend / Holiday (CASE 4)", value=False)
+
+    st.markdown("#### 🕒 Jadwal Shift (System)")
+    col_sched1, col_sched2 = st.columns(2)
+    with col_sched1:
+        # Default value dari JS: 08:30
+        default_sched_in = datetime.strptime("08:30", "%H:%M").time()
+        sched_in = st.time_input("Mulai Shift (System)", value=default_sched_in, disabled=is_weekend)
+    with col_sched2:
+        # Default value dari JS: 17:30
+        default_sched_out = datetime.strptime("17:30", "%H:%M").time()
+        sched_out = st.time_input("Pulang Shift (System)", value=default_sched_out, disabled=is_weekend)
+
+    st.markdown("#### ⚡ Jadwal Lembur Aktual")
+    col_ot1, col_ot2 = st.columns(2)
+    with col_ot1:
+        ot_in = st.time_input("Mulai Lembur", value=default_sched_out)
+    with col_ot2:
+        # Default value dari JS: 15:00 (cuma contoh di JS, biarkan 20:00 biar masuk akal)
+        ot_out = st.time_input("Selesai Lembur", value=datetime.strptime("20:00", "%H:%M").time())
+
+    if st.button("Hitung Durasi (SUBMIT)", type="primary"):
+        # --- LOGIC PYTHON MIRIP JS ---
+        
+        # Helper: Combine date + time
+        def combine_dt(t_obj):
+            return datetime.combine(tgl_lembur, t_obj)
+
+        dt_sched_in = combine_dt(sched_in)
+        dt_sched_out = combine_dt(sched_out)
+        dt_ot_in = combine_dt(ot_in)
+        dt_ot_out = combine_dt(ot_out)
+
+        # Handle Midnight Crossing (Handle hari berikutnya)
+        if dt_sched_out <= dt_sched_in:
+            dt_sched_out += timedelta(days=1)
+        
+        if dt_ot_out <= dt_ot_in:
+            dt_ot_out += timedelta(days=1)
+
+        # Variables to store results
+        dur_before = timedelta()
+        dur_after = timedelta()
+        break_before = timedelta()
+        break_after = timedelta()
+        case_name = "UNKNOWN"
+        
+        # Helper untuk format timedelta ke jam menit
+        def format_td(td):
+            total_sec = td.total_seconds()
+            h = int(total_sec // 3600)
+            m = int((total_sec % 3600) // 60)
+            return f"{h} Jam {m} Menit"
+
+        # LOGIC CALCULATION
+        if is_weekend:
+            case_name = "CASE 4: Lembur di Hari Libur / Weekend"
+            
+            # Durasi mentah
+            diff_raw = dt_ot_out - dt_ot_in
+            
+            # Di weekend, anggap semua jam adalah lembur (tanpa potongan)
+            # Di JS: durAfter = diffRaw (di display di kolom OT Duration)
+            dur_after = diff_raw # Kita masukkan ke dur_after biar muncul di hasil
+            
+        else:
+            # WEEKDAY LOGIC
+            if dt_ot_in < dt_sched_out:
+                # CASE 1: Lembur dimulai sebelum jam pulang system
+                case_name = f"CASE 1: Lembur Setelah Jam Kerja (Dimulai Sebelum {sched_out.strftime('%H:%M')})"
+                
+                # Durasi sebelum jam pulang (dari OT In sampai Jam Pulang System)
+                if dt_ot_in < dt_sched_out:
+                    dur_before = dt_sched_out - dt_ot_in
+                
+                # Durasi setelah jam pulang (dari Jam Pulang System sampai OT Out)
+                if dt_ot_out > dt_sched_out:
+                    dur_after = dt_ot_out - dt_sched_out
+                    
+            elif dt_ot_in >= dt_sched_out:
+                # CASE 2 & 3
+                
+                # Deteksi Case 3 (Overnight / Besokannya)
+                # Di JS: jika jam selesai < jam masuk shift
+                if ot_out < sched_in:
+                    case_name = "CASE 3: Lembur Sebelum Jam Kerja (Overnight)"
+                else:
+                    case_name = f"CASE 2: Lembur Setelah Jam Kerja (Dimulai Setelah {sched_out.strftime('%H:%M')})"
+
+                # Durasi setelah jam pulang system
+                dur_after = dt_ot_out - dt_sched_out
+                
+                # Break setelah jam kerja (Gap antara pulang system s/d mulai lembur)
+                break_after = dt_ot_in - dt_sched_out
+
+        # --- FINAL CALCULATION ---
+        total_duration = dur_before + dur_after - break_before - break_after
+        
+        # Handle negative total (jika error logic)
+        if total_duration.total_seconds() < 0:
+            total_duration = timedelta()
+
+        # --- DISPLAY RESULTS ---
+        st.markdown("---")
+        st.subheader("📊 Hasil Perhitungan")
+        
+        # Create Columns for Layout
+        col_res1, col_res2 = st.columns(2)
+        
+        with col_res1:
+            if not is_weekend:
+                st.metric("Overtime Before Duration", format_td(dur_before))
+                st.metric("Break Before Duration", format_td(break_before))
+            else:
+                # Weekend Display
+                st.info(f"Schedule In: **{ot_in.strftime('%H:%M')}** | Schedule Out: **{ot_out.strftime('%H:%M')}**")
+            
+        with col_res2:
+            st.metric("Overtime After Duration", format_td(dur_after))
+            if not is_weekend:
+                st.metric("Break After Duration", format_td(break_after))
+        
+        st.markdown("---")
+        st.success(f"**TOTAL LEMBUR: {format_td(total_duration)}**")
+        st.caption(f"Kategori: {case_name}")
+
 # --- HALAMAN LOGIN ---
 def show_login_page():
     st.title("🔒 Login Sistem Lembur")
@@ -306,7 +445,8 @@ def show_admin_view():
         st.title(f"👋 Halo, {st.session_state.username}")
         st.caption(f"Role: {st.session_state.role}")
         st.markdown("---")
-        menu = st.radio("Navigation", ["Create Surat", "Dashboard", "Data & Hapus", "Tools PDF"])
+        # TAMBAHAN MENU: "Kalkulator Lembur"
+        menu = st.radio("Navigation", ["Create Surat", "Dashboard", "Data & Hapus", "Tools PDF", "Kalkulator Lembur"])
         st.markdown("---")
         if st.button("Logout"):
             st.session_state.logged_in = False
@@ -320,6 +460,8 @@ def show_admin_view():
         show_data_management()
     elif menu == "Tools PDF":
         show_pdf_tools()
+    elif menu == "Kalkulator Lembur":
+        show_overtime_calculator()
 
 # --- SUB-MENU ADMIN: FORM ---
 def show_form_content():
@@ -520,7 +662,8 @@ def main():
         elif st.session_state.role == "Guest":
             with st.sidebar:
                 st.title("Menu Guest")
-                guest_menu = st.radio("Navigation", ["Rekap Lembur", "Tools PDF"])
+                # TAMBAHAN MENU: "Kalkulator Lembur"
+                guest_menu = st.radio("Navigation", ["Rekap Lembur", "Tools PDF", "Kalkulator Lembur"])
                 st.markdown("---")
                 if st.button("Logout"):
                     st.session_state.logged_in = False
@@ -530,6 +673,8 @@ def main():
                 show_guest_view()
             elif guest_menu == "Tools PDF":
                 show_pdf_tools()
+            elif guest_menu == "Kalkulator Lembur":
+                show_overtime_calculator()
 
 if __name__ == "__main__":
     main()
