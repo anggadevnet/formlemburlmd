@@ -6,11 +6,9 @@ import pandas as pd
 import os
 import tempfile
 import zipfile
-import sys
-import platform
+import base64
 
 # --- IMPORT PDF (DENGAN PENANGANAN ERROR) ---
-# Kita coba import, kalau gagal kita kasih tahu di halaman tools
 try:
     from pypdf import PdfReader, PdfWriter
     PDF_SUPPORT = True
@@ -115,7 +113,6 @@ def show_pdf_tools():
     with tab1:
         st.subheader("Gabungkan File PDF")
         
-        # Cek dulu apakah library PDF ada
         if not PDF_SUPPORT:
             st.error("Library PDF (pypdf/PyPDF2) tidak ditemukan. Tambahkan 'pypdf' ke requirements.txt.")
         else:
@@ -145,79 +142,76 @@ def show_pdf_tools():
                     except Exception as e:
                         st.error(f"Terjadi error saat menggabungkan: {e}")
 
-    # --- TAB 2: WORD TO PDF ---
+    # --- TAB 2: WORD TO PDF (SOLUSI ALTERNATIF) ---
     with tab2:
         st.subheader("Convert Word ke PDF")
+        st.info("ℹ️ Fitur ini menggunakan converter alternatif (mammoth + xhtml2pdf) agar bisa jalan di Streamlit Cloud. Format mungkin sedikit berbeda dari MS Word asli.")
         
-        # Deteksi Sistem Operasi
-        current_os = platform.system()
+        uploaded_docxs = st.file_uploader("Pilih file Word (.docx)", type="docx", accept_multiple_files=True, key="word_to_pdf_uploader")
         
-        # Jika di Linux (Streamlit Cloud), matikan fitur ini
-        if current_os == "Linux":
-            st.warning("⚠️ **Fitur ini tidak didukung di Streamlit Cloud.**")
-            st.info("Konversi Word ke PDF menggunakan `docx2pdf` membutuhkan Microsoft Word yang hanya ada di Windows. Silakan jalankan aplikasi ini di komputer lokal (localhost) untuk menggunakan fitur ini.")
-        
-        # Jika di Windows, jalankan fitur
-        else:
-            st.info("Pilih file Word (.docx). Fitur ini hanya berjalan di Windows Local.")
-            uploaded_docxs = st.file_uploader("Pilih file Word (.docx)", type="docx", accept_multiple_files=True, key="word_to_pdf_uploader")
-            
-            if uploaded_docxs:
-                if st.button("Convert Semua ke PDF", type="primary"):
-                    try:
-                        # Import hanya saat dibutuhkan dan di Windows
-                        import pythoncom 
-                        from docx2pdf import convert
+        if uploaded_docxs:
+            if st.button("Convert Semua ke PDF", type="primary"):
+                try:
+                    # Import library alternatif (Pure Python, support Linux)
+                    import mammoth
+                    from xhtml2pdf import pisa
+                    
+                    zip_buffer = io.BytesIO()
+                    
+                    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
                         
-                        pythoncom.CoInitialize()
-                        
-                        zip_buffer = io.BytesIO()
-                        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-                            with tempfile.TemporaryDirectory() as temp_dir:
-                                progress_bar = st.progress(0)
-                                status_text = st.empty()
-                                
-                                for i, docx_file in enumerate(uploaded_docxs):
-                                    status_text.text(f"Memproses file {i+1} dari {len(uploaded_docxs)}: {docx_file.name}")
-                                    
-                                    base_name = os.path.splitext(docx_file.name)[0]
-                                    temp_docx_path = os.path.join(temp_dir, f"temp_{i}.docx")
-                                    temp_pdf_path = os.path.join(temp_dir, f"temp_{i}.pdf")
-                                    
-                                    with open(temp_docx_path, "wb") as f:
-                                        f.write(docx_file.getbuffer())
-                                    
-                                    convert(temp_docx_path, temp_pdf_path)
-                                    
-                                    if os.path.exists(temp_pdf_path):
-                                        with open(temp_pdf_path, "rb") as f:
-                                            pdf_data = f.read()
-                                        zf.writestr(f"{base_name}.pdf", pdf_data)
-                                    else:
-                                        st.warning(f"Gagal konversi: {docx_file.name}")
-                                    
-                                    progress_bar.progress((i + 1) / len(uploaded_docxs))
-                                status_text.text("Selesai!")
-                        
-                        zip_buffer.seek(0)
-                        st.success(f"Berhasil mengkonversi {len(uploaded_docxs)} file!")
-                        st.download_button(
-                            label="📥 Download Semua PDF (ZIP)",
-                            data=zip_buffer,
-                            file_name="converted_documents.zip",
-                            mime="application/zip"
-                        )
+                        for i, docx_file in enumerate(uploaded_docxs):
+                            status_text.text(f"Memproses file {i+1} dari {len(uploaded_docxs)}: {docx_file.name}")
                             
-                    except ImportError:
-                        st.error("Library 'docx2pdf' belum terinstall. Jalankan: pip install docx2pdf")
-                    except Exception as e:
-                        st.error(f"Gagal konversi: {str(e)}")
-                    finally:
-                        try:
-                            import pythoncom
-                            pythoncom.CoUninitialize()
-                        except:
-                            pass
+                            # 1. Baca DOCX jadi HTML (menggunakan mammoth)
+                            # mammoth membutuh bytes atau file-like object
+                            result = mammoth.convert_to_html(docx_file)
+                            html_content = result.value
+                            
+                            # Tambahkan styling dasar biar rapi
+                            html_wrapped = f"""
+                            <html>
+                                <head>
+                                    <style>
+                                        body {{ font-family: Arial, sans-serif; font-size: 12px; }}
+                                        table {{ border-collapse: collapse; width: 100%; }}
+                                        td, th {{ border: 1px solid #000; padding: 5px; }}
+                                    </style>
+                                </head>
+                                <body>{html_content}</body>
+                            </html>
+                            """
+                            
+                            # 2. Convert HTML jadi PDF (menggunakan xhtml2pdf)
+                            pdf_buffer = io.BytesIO()
+                            pisa_status = pisa.CreatePDF(html_wrapped, dest=pdf_buffer)
+                            
+                            if not pisa_status.err:
+                                # Masukkan ke ZIP
+                                base_name = os.path.splitext(docx_file.name)[0]
+                                zf.writestr(f"{base_name}.pdf", pdf_buffer.getvalue())
+                            else:
+                                st.warning(f"Gagal konversi: {docx_file.name}")
+                            
+                            progress_bar.progress((i + 1) / len(uploaded_docxs))
+                        
+                        status_text.text("Selesai!")
+                    
+                    zip_buffer.seek(0)
+                    st.success(f"Berhasil mengkonversi {len(uploaded_docxs)} file!")
+                    st.download_button(
+                        label="📥 Download Semua PDF (ZIP)",
+                        data=zip_buffer,
+                        file_name="converted_documents.zip",
+                        mime="application/zip"
+                    )
+                
+                except ImportError:
+                    st.error("Library converter belum terinstall. Tambahkan 'mammoth' dan 'xhtml2pdf' ke requirements.txt.")
+                except Exception as e:
+                    st.error(f"Terjadi error: {str(e)}")
 
 # --- FITUR BARU: KALKULATOR LEMBUR ---
 def show_overtime_calculator():
