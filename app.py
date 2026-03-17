@@ -6,6 +6,8 @@ import pandas as pd
 import os
 import tempfile
 import zipfile
+import platform
+import subprocess
 
 # --- IMPORT PDF (VERSI AMAN) ---
 try:
@@ -26,13 +28,12 @@ if not os.path.exists(DOCS_FOLDER):
 
 # --- DATABASE KARYAWAN & ATASAN ---
 data_karyawan = {
-    "ANGGA SEPTIAN CAHYA": "09244925",
+    "ANGGA SEPTIAN CAHYA": "092a44925",
     "AZIS SAEFUDIN": "09244926",
     "NADINE PUSPITA SARI": "09244924",
     "MOCH DIKI RAMDANI": "09244923",
     "MOHAMMAD SYAIFUL ICHSAN": "09244931",
-    "MUKHLIS": "09244929",
-    "NAFIRA NURZAHRA": "09244914"
+    "MUKHLIS": "09244929"
 }
 
 data_atasan = {
@@ -61,8 +62,6 @@ def save_to_db(data):
     df.to_csv(DB_FILE, index=False)
 
 def load_db():
-    if not os.path.exists(DB_FILE):
-        return pd.DataFrame()
     df = pd.read_csv(DB_FILE)
     return df
 
@@ -99,7 +98,108 @@ def hitung_durasi(mulai_obj, selesai_obj):
     selesai_str = selesai_obj.strftime("%H:%M")
     return f"{mulai_str} - {selesai_str} , {teks_jam}", total_jam
 
-# --- FUNGSI FITUR TOOLS PDF (MODIFIED) ---
+# --- FITUR: KALKULATOR LEMBUR ---
+def show_overtime_calculator():
+    st.title("⏱️ Kalkulator Durasi Lembur")
+    st.markdown("---")
+    st.markdown("Isi data dibawah ini untuk menghitung durasi lembur otomatis mengikuti guide logic.")
+    
+    # --- INPUTS ---
+    col_date, col_weekend = st.columns([2, 1])
+    with col_date:
+        tgl_lembur = st.date_input("Tanggal Lembur", value=date.today())
+    with col_weekend:
+        is_weekend = st.checkbox("Weekend / Holiday (CASE 4)", value=False)
+
+    st.markdown("#### 🕒 Jadwal Shift (System)")
+    col_sched1, col_sched2 = st.columns(2)
+    with col_sched1:
+        default_sched_in = datetime.strptime("08:30", "%H:%M").time()
+        sched_in = st.time_input("Mulai Shift (System)", value=default_sched_in, disabled=is_weekend)
+    with col_sched2:
+        default_sched_out = datetime.strptime("17:30", "%H:%M").time()
+        sched_out = st.time_input("Pulang Shift (System)", value=default_sched_out, disabled=is_weekend)
+
+    st.markdown("#### ⚡ Jadwal Lembur Aktual")
+    col_ot1, col_ot2 = st.columns(2)
+    with col_ot1:
+        ot_in = st.time_input("Mulai Lembur", value=default_sched_out)
+    with col_ot2:
+        ot_out = st.time_input("Selesai Lembur", value=datetime.strptime("20:00", "%H:%M").time())
+
+    if st.button("Hitung Durasi (SUBMIT)", type="primary"):
+        # --- LOGIC PYTHON ---
+        def combine_dt(t_obj):
+            return datetime.combine(tgl_lembur, t_obj)
+
+        dt_sched_in = combine_dt(sched_in)
+        dt_sched_out = combine_dt(sched_out)
+        dt_ot_in = combine_dt(ot_in)
+        dt_ot_out = combine_dt(ot_out)
+
+        if dt_sched_out <= dt_sched_in:
+            dt_sched_out += timedelta(days=1)
+        
+        if dt_ot_out <= dt_ot_in:
+            dt_ot_out += timedelta(days=1)
+
+        dur_before = timedelta()
+        dur_after = timedelta()
+        break_before = timedelta()
+        break_after = timedelta()
+        case_name = "UNKNOWN"
+        
+        def format_td(td):
+            total_sec = td.total_seconds()
+            h = int(total_sec // 3600)
+            m = int((total_sec % 3600) // 60)
+            return f"{h} Jam {m} Menit"
+
+        if is_weekend:
+            case_name = "CASE 4: Lembur di Hari Libur / Weekend"
+            diff_raw = dt_ot_out - dt_ot_in
+            dur_after = diff_raw
+        else:
+            if dt_ot_in < dt_sched_out:
+                case_name = f"CASE 1: Lembur Setelah Jam Kerja (Dimulai Sebelum {sched_out.strftime('%H:%M')})"
+                if dt_ot_in < dt_sched_out:
+                    dur_before = dt_sched_out - dt_ot_in
+                if dt_ot_out > dt_sched_out:
+                    dur_after = dt_ot_out - dt_sched_out
+            elif dt_ot_in >= dt_sched_out:
+                if ot_out < sched_in:
+                    case_name = "CASE 3: Lembur Sebelum Jam Kerja (Overnight)"
+                else:
+                    case_name = f"CASE 2: Lembur Setelah Jam Kerja (Dimulai Setelah {sched_out.strftime('%H:%M')})"
+                dur_after = dt_ot_out - dt_sched_out
+                break_after = dt_ot_in - dt_sched_out
+
+        total_duration = dur_before + dur_after - break_before - break_after
+        
+        if total_duration.total_seconds() < 0:
+            total_duration = timedelta()
+
+        st.markdown("---")
+        st.subheader("📊 Hasil Perhitungan")
+        
+        col_res1, col_res2 = st.columns(2)
+        with col_res1:
+            if not is_weekend:
+                st.metric("Overtime Before Duration", format_td(dur_before))
+                st.metric("Break Before Duration", format_td(break_before))
+            else:
+                st.info(f"Schedule In: **{ot_in.strftime('%H:%M')}** | Schedule Out: **{ot_out.strftime('%H:%M')}**")
+            
+        with col_res2:
+            st.metric("Overtime After Duration", format_td(dur_after))
+            if not is_weekend:
+                st.metric("Break After Duration", format_td(break_after))
+        
+        st.markdown("---")
+        st.success(f"**TOTAL LEMBUR: {format_td(total_duration)}**")
+        st.caption(f"Kategori: {case_name}")
+
+# --- FITUR: TOOLS PDF & FILE ---
 def show_pdf_tools():
     st.title("🛠️ Tools PDF & File")
     st.markdown("---")
@@ -115,7 +215,6 @@ def show_pdf_tools():
             if st.button("Gabungkan PDF", type="primary"):
                 try:
                     writer = PdfWriter()
-                    
                     for pdf in uploaded_pdfs:
                         reader = PdfReader(pdf)
                         for page in reader.pages:
@@ -135,223 +234,92 @@ def show_pdf_tools():
                 except Exception as e:
                     st.error(f"Terjadi error saat menggabungkan: {e}")
 
-    # --- TAB 2: WORD TO PDF (BATCH CONVERT) ---
+    # --- TAB 2: WORD TO PDF (SMART LOGIC) ---
     with tab2:
-        st.subheader("Convert Word ke PDF (Banyak File)")
-        st.info("Pilih satu atau banyak file Word (.docx) sekaligus. Hasilnya akan dijadikan satu file ZIP.")
+        st.subheader("Convert Word ke PDF")
+        st.info("Pilih file Word (.docx). Hasil akan dijadikan satu file ZIP.")
         
         uploaded_docxs = st.file_uploader("Pilih file Word (.docx)", type="docx", accept_multiple_files=True, key="word_to_pdf_uploader")
         
         if uploaded_docxs:
             if st.button("Convert Semua ke PDF", type="primary"):
-                # --- PERBAIKAN ERROR COINITIALIZE ---
-                try:
-                    # Inisialisasi COM Library (Wajib untuk docx2pdf di Streamlit)
-                    pythoncom.CoInitialize()
-                    
-                    # Import library convert (diimpor di sini agar error handling lebih bagus)
-                    from docx2pdf import convert
-                    
-                    # Siapkan buffer untuk ZIP
-                    zip_buffer = io.BytesIO()
-                    
-                    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-                        # Buat folder sementara untuk proses
-                        with tempfile.TemporaryDirectory() as temp_dir:
-                            progress_bar = st.progress(0)
-                            status_text = st.empty()
+                is_windows = platform.system() == "Windows"
+                zip_buffer = io.BytesIO()
+                
+                # Progress Bar
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                error_found = False
+
+                with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        for i, docx_file in enumerate(uploaded_docxs):
+                            status_text.text(f"Memproses {i+1}/{len(uploaded_docxs)}: {docx_file.name}")
                             
-                            for i, docx_file in enumerate(uploaded_docxs):
-                                # Update status
-                                status_text.text(f"Memproses file {i+1} dari {len(uploaded_docxs)}: {docx_file.name}")
-                                
-                                # Path sementara
-                                base_name = os.path.splitext(docx_file.name)[0]
-                                temp_docx_path = os.path.join(temp_dir, f"temp_{i}.docx")
-                                temp_pdf_path = os.path.join(temp_dir, f"temp_{i}.pdf")
-                                
-                                # Tulis file upload ke disk sementara
-                                with open(temp_docx_path, "wb") as f:
-                                    f.write(docx_file.getbuffer())
-                                
-                                # Convert (Butuh MS Word)
-                                convert(temp_docx_path, temp_pdf_path)
-                                
-                                # Baca hasil PDF dan masukkan ke ZIP
-                                if os.path.exists(temp_pdf_path):
-                                    with open(temp_pdf_path, "rb") as f:
-                                        pdf_data = f.read()
-                                    
-                                    # Nama file di dalam zip
-                                    pdf_name_in_zip = f"{base_name}.pdf"
-                                    zf.writestr(pdf_name_in_zip, pdf_data)
-                                else:
-                                    st.warning(f"Gagal konversi: {docx_file.name}")
-                                
-                                # Update progress bar
-                                progress_bar.progress((i + 1) / len(uploaded_docxs))
+                            base_name = os.path.splitext(docx_file.name)[0]
+                            temp_docx_path = os.path.join(temp_dir, f"temp_{i}.docx")
+                            temp_pdf_path = os.path.join(temp_dir, f"temp_{i}.pdf")
                             
-                            status_text.text("Selesai!")
-                    
-                    # Selesai, siapkan download
-                    zip_buffer.seek(0)
-                    
-                    st.success(f"Berhasil mengkonversi {len(uploaded_docxs)} file!")
-                    st.download_button(
-                        label="📥 Download Semua PDF (ZIP)",
-                        data=zip_buffer,
-                        file_name="converted_documents.zip",
-                        mime="application/zip"
-                    )
-                        
-                except ImportError:
-                    st.error("Library 'docx2pdf' belum terinstall.")
-                    st.code("pip install docx2pdf")
-                    st.info("Note: Fitur ini membutuhkan Microsoft Word terinstall di komputer/server.")
-                except Exception as e:
-                    st.error(f"Gagal konversi: {str(e)}")
-                finally:
-                    # Selalu uninitialize COM setelah selesai
-                    pythoncom.CoUninitialize()
-                # ------------------------------------
+                            # Simpan file upload ke temp
+                            with open(temp_docx_path, "wb") as f:
+                                f.write(docx_file.getbuffer())
+                            
+                            converted = False
 
-# --- FITUR BARU: KALKULATOR LEMBUR ---
-def show_overtime_calculator():
-    st.title("⏱️ Kalkulator Durasi Lembur")
-    st.markdown("---")
-    st.markdown("Isi data dibawah ini untuk menghitung durasi lembur otomatis mengikuti guide logic.")
-    
-    # --- INPUTS ---
-    col_date, col_weekend = st.columns([2, 1])
-    with col_date:
-        tgl_lembur = st.date_input("Tanggal Lembur", value=date.today())
-    with col_weekend:
-        # Checkbox untuk menandai weekend
-        is_weekend = st.checkbox("Weekend / Holiday (CASE 4)", value=False)
+                            # 1. COBA PAKAI MS WORD (WINDOWS ONLY)
+                            if is_windows:
+                                try:
+                                    import pythoncom
+                                    pythoncom.CoInitialize()
+                                    from docx2pdf import convert
+                                    convert(temp_docx_path, temp_pdf_path)
+                                    pythoncom.CoUninitialize()
+                                    converted = True
+                                except Exception as e:
+                                    st.warning(f"Gagal convert via MS Word ({docx_file.name}): {e}")
+                            
+                            # 2. COBA PAKAI LIBREOFFICE (LINUX/STREAMLIT CLOUD)
+                            # LibreOffice command: soffice --headless --convert-to pdf
+                            if not converted:
+                                try:
+                                    # Cek apakah soffice ada
+                                    subprocess.run(['soffice', '--headless', '--convert-to', 'pdf', temp_docx_path, '--outdir', temp_dir], check=True, capture_output=True)
+                                    # LibreOffice hasilnya kadang namanya beda, jadi cek file pdf yang baru dibuat
+                                    # Di beberapa versi, output nama file mengikuti input
+                                    if os.path.exists(temp_pdf_path):
+                                        converted = True
+                                    else:
+                                        # Kadang libreoffice bikin file dengan nama asli
+                                        possible_pdf = os.path.join(temp_dir, f"{base_name}.pdf")
+                                        if os.path.exists(possible_pdf):
+                                            os.rename(possible_pdf, temp_pdf_path)
+                                            converted = True
+                                except Exception as e:
+                                    st.warning(f"Gagal convert via LibreOffice ({docx_file.name}). Pastikan sudah diinstal di server.")
+                            
+                            # Masukin ke ZIP kalo berhasil
+                            if converted and os.path.exists(temp_pdf_path):
+                                with open(temp_pdf_path, "rb") as f:
+                                    pdf_data = f.read()
+                                zf.writestr(f"{base_name}.pdf", pdf_data)
+                            else:
+                                error_found = True
 
-    st.markdown("#### 🕒 Jadwal Shift (System)")
-    col_sched1, col_sched2 = st.columns(2)
-    with col_sched1:
-        # Default value dari JS: 08:30
-        default_sched_in = datetime.strptime("08:30", "%H:%M").time()
-        sched_in = st.time_input("Mulai Shift (System)", value=default_sched_in, disabled=is_weekend)
-    with col_sched2:
-        # Default value dari JS: 17:30
-        default_sched_out = datetime.strptime("17:30", "%H:%M").time()
-        sched_out = st.time_input("Pulang Shift (System)", value=default_sched_out, disabled=is_weekend)
+                            progress_bar.progress((i + 1) / len(uploaded_docxs))
 
-    st.markdown("#### ⚡ Jadwal Lembur Aktual")
-    col_ot1, col_ot2 = st.columns(2)
-    with col_ot1:
-        ot_in = st.time_input("Mulai Lembur", value=default_sched_out)
-    with col_ot2:
-        # Default value dari JS: 15:00 (cuma contoh di JS, biarkan 20:00 biar masuk akal)
-        ot_out = st.time_input("Selesai Lembur", value=datetime.strptime("20:00", "%H:%M").time())
+                status_text.text("Selesai!")
+                zip_buffer.seek(0)
 
-    if st.button("Hitung Durasi (SUBMIT)", type="primary"):
-        # --- LOGIC PYTHON MIRIP JS ---
-        
-        # Helper: Combine date + time
-        def combine_dt(t_obj):
-            return datetime.combine(tgl_lembur, t_obj)
-
-        dt_sched_in = combine_dt(sched_in)
-        dt_sched_out = combine_dt(sched_out)
-        dt_ot_in = combine_dt(ot_in)
-        dt_ot_out = combine_dt(ot_out)
-
-        # Handle Midnight Crossing (Handle hari berikutnya)
-        if dt_sched_out <= dt_sched_in:
-            dt_sched_out += timedelta(days=1)
-        
-        if dt_ot_out <= dt_ot_in:
-            dt_ot_out += timedelta(days=1)
-
-        # Variables to store results
-        dur_before = timedelta()
-        dur_after = timedelta()
-        break_before = timedelta()
-        break_after = timedelta()
-        case_name = "UNKNOWN"
-        
-        # Helper untuk format timedelta ke jam menit
-        def format_td(td):
-            total_sec = td.total_seconds()
-            h = int(total_sec // 3600)
-            m = int((total_sec % 3600) // 60)
-            return f"{h} Jam {m} Menit"
-
-        # LOGIC CALCULATION
-        if is_weekend:
-            case_name = "CASE 4: Lembur di Hari Libur / Weekend"
-            
-            # Durasi mentah
-            diff_raw = dt_ot_out - dt_ot_in
-            
-            # Di weekend, anggap semua jam adalah lembur (tanpa potongan)
-            # Di JS: durAfter = diffRaw (di display di kolom OT Duration)
-            dur_after = diff_raw # Kita masukkan ke dur_after biar muncul di hasil
-            
-        else:
-            # WEEKDAY LOGIC
-            if dt_ot_in < dt_sched_out:
-                # CASE 1: Lembur dimulai sebelum jam pulang system
-                case_name = f"CASE 1: Lembur Setelah Jam Kerja (Dimulai Sebelum {sched_out.strftime('%H:%M')})"
+                if error_found:
+                    st.warning("Beberapa file gagal dikonversi. Pastikan server mendukung konversi (MS Word di Windows atau LibreOffice di Linux).")
                 
-                # Durasi sebelum jam pulang (dari OT In sampai Jam Pulang System)
-                if dt_ot_in < dt_sched_out:
-                    dur_before = dt_sched_out - dt_ot_in
-                
-                # Durasi setelah jam pulang (dari Jam Pulang System sampai OT Out)
-                if dt_ot_out > dt_sched_out:
-                    dur_after = dt_ot_out - dt_sched_out
-                    
-            elif dt_ot_in >= dt_sched_out:
-                # CASE 2 & 3
-                
-                # Deteksi Case 3 (Overnight / Besokannya)
-                # Di JS: jika jam selesai < jam masuk shift
-                if ot_out < sched_in:
-                    case_name = "CASE 3: Lembur Sebelum Jam Kerja (Overnight)"
-                else:
-                    case_name = f"CASE 2: Lembur Setelah Jam Kerja (Dimulai Setelah {sched_out.strftime('%H:%M')})"
-
-                # Durasi setelah jam pulang system
-                dur_after = dt_ot_out - dt_sched_out
-                
-                # Break setelah jam kerja (Gap antara pulang system s/d mulai lembur)
-                break_after = dt_ot_in - dt_sched_out
-
-        # --- FINAL CALCULATION ---
-        total_duration = dur_before + dur_after - break_before - break_after
-        
-        # Handle negative total (jika error logic)
-        if total_duration.total_seconds() < 0:
-            total_duration = timedelta()
-
-        # --- DISPLAY RESULTS ---
-        st.markdown("---")
-        st.subheader("📊 Hasil Perhitungan")
-        
-        # Create Columns for Layout
-        col_res1, col_res2 = st.columns(2)
-        
-        with col_res1:
-            if not is_weekend:
-                st.metric("Overtime Before Duration", format_td(dur_before))
-                st.metric("Break Before Duration", format_td(break_before))
-            else:
-                # Weekend Display
-                st.info(f"Schedule In: **{ot_in.strftime('%H:%M')}** | Schedule Out: **{ot_out.strftime('%H:%M')}**")
-            
-        with col_res2:
-            st.metric("Overtime After Duration", format_td(dur_after))
-            if not is_weekend:
-                st.metric("Break After Duration", format_td(break_after))
-        
-        st.markdown("---")
-        st.success(f"**TOTAL LEMBUR: {format_td(total_duration)}**")
-        st.caption(f"Kategori: {case_name}")
+                st.success(f"Proses selesai!")
+                st.download_button(
+                    label="📥 Download Semua PDF (ZIP)",
+                    data=zip_buffer,
+                    file_name="converted_documents.zip",
+                    mime="application/zip"
+                )
 
 # --- HALAMAN LOGIN ---
 def show_login_page():
@@ -444,7 +412,7 @@ def show_admin_view():
         st.title(f"👋 Halo, {st.session_state.username}")
         st.caption(f"Role: {st.session_state.role}")
         st.markdown("---")
-        # TAMBAHAN MENU: "Kalkulator Lembur"
+        # Menu ditambah "Tools PDF" & "Kalkulator Lembur"
         menu = st.radio("Navigation", ["Create Surat", "Dashboard", "Data & Hapus", "Tools PDF", "Kalkulator Lembur"])
         st.markdown("---")
         if st.button("Logout"):
@@ -594,7 +562,6 @@ def show_dashboard():
         col_nama.write(f"**{row['Nama']}**")
         col_jam.metric("Jam", f"{row['Total_Jam']}")
 
-        # --- PERBAIKAN: row['Nome'] -> row['Nama'] ---
         files_person = df_filtered[df_filtered['Nama'] == row['Nama']]
         
         with col_aksi:
@@ -661,7 +628,6 @@ def main():
         elif st.session_state.role == "Guest":
             with st.sidebar:
                 st.title("Menu Guest")
-                # TAMBAHAN MENU: "Kalkulator Lembur"
                 guest_menu = st.radio("Navigation", ["Rekap Lembur", "Tools PDF", "Kalkulator Lembur"])
                 st.markdown("---")
                 if st.button("Logout"):
