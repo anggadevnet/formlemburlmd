@@ -408,7 +408,7 @@ def show_dashboard():
                                 st.caption("File hilang")
         st.markdown("---")
 
-# --- DATA MANAGEMENT (FIXED LOGIC) ---
+# --- DATA MANAGEMENT (DEBUG MODE) ---
 def show_data_management():
     st.title("⚙️ Manajemen Data")
     df = load_db()
@@ -416,22 +416,38 @@ def show_data_management():
     
     st.markdown("---")
     
-    # Cek koneksi langsung saat menu ini dibuka
+    # --- DEBUGGING AREA (HAPUS NANTI KALAU UDAH SUKSES) ---
+    with st.expander("🐛 Klik Ini Buat Cek Kenapa Gagal"):
+        st.write("Mencoba akses Secrets...")
+        try:
+            # Coba akses langsung mentah
+            token = st.secrets["GITHUB_TOKEN"]
+            repo = st.secrets["REPO_NAME"]
+            st.success(f"✅ Secrets KETEMU! Key-nya bener.")
+            st.write(f"Repo: {repo}")
+            st.write(f"Token (Awalan): {token[:4]}...{token[-4:]}")
+        except KeyError as e:
+            st.error(f"❌ KeyError: Key '{e}' tidak ditemukan.")
+            st.warning("Artinya: Nama Key di Secrets salah atau belum disave.")
+        except Exception as e:
+            st.error(f"❌ Error Lain: {e}")
+    # -----------------------------------------------------
+
+    st.markdown("---")
+    st.subheader("Manual Sync")
+    
+    # Proses Sync
     token, repo = get_github_secrets()
     
     if token and repo:
-        st.success(f"✅ GitHub Terhubung: {repo}")
-        
-        if st.button("☁️ Sync Database ke GitHub (Manual)", type="primary"):
-            with st.spinner("Mengupload ke GitHub..."):
+        if st.button("☁️ Sync Database ke GitHub", type="primary"):
+            with st.spinner("Proses upload..."):
                 if push_to_github(DB_FILE, DB_FILE, "Manual DB Sync"):
-                    st.success("✅ Sync sukses! Data aman di repo.")
+                    st.success("✅ Sukses!")
                 else:
-                    st.error("❌ Gagal sync. Cek log error di layar.")
+                    st.error("Gagal. Cek expander debug di atas.")
     else:
-        st.error("❌ Secrets tidak ditemukan.")
-        st.info("Pastikan di Settings -> Secrets ada:")
-        st.code("GITHUB_TOKEN = 'token_kamu'\nREPO_NAME = 'username/repo'")
+        st.error("❌ Secrets belum siap. Cek di Expander Debug di atas kenapa.")
 
 # --- MAIN ---
 def main():
