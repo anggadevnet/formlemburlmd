@@ -25,6 +25,7 @@ DB_FILE = 'database_lembur.csv'
 DOCS_FOLDER = 'generated_docs'
 
 # --- SETUP FOLDER ---
+# Ini bakal auto create folder kalau ga ada (misal dihapus pas bulk delete)
 if not os.path.exists(DOCS_FOLDER):
     os.makedirs(DOCS_FOLDER, exist_ok=True)
 
@@ -44,7 +45,7 @@ data_atasan = {
 }
 users_db = {"admin": "admin123", "hrd": "hrd123"}
 
-# --- FUNGSI GITHUB HELPER (UNTUK PERSISTENCE) ---
+# --- FUNGSI GITHUB HELPER (PUSH FILE & DB) ---
 def get_github_secrets():
     try:
         token = st.secrets["GITHUB_TOKEN"]
@@ -54,6 +55,7 @@ def get_github_secrets():
         return None, None
 
 def push_to_github(file_path, repo_path, commit_message):
+    """Fungsi universal untuk push file apapun ke GitHub"""
     token, repo_name = get_github_secrets()
     if not token or not repo_name:
         return False
@@ -64,16 +66,18 @@ def push_to_github(file_path, repo_path, commit_message):
         with open(file_path, "rb") as f:
             content = f.read()
         try:
+            # Update jika file sudah ada
             contents = repo.get_contents(repo_path)
             repo.update_file(contents.path, commit_message, content, contents.sha, branch="main")
         except GithubException as e:
             if e.status == 404:
+                # Create jika file belum ada (auto create folder juga)
                 repo.create_file(repo_path, commit_message, content, branch="main")
             else:
                 raise e
         return True
     except Exception as e:
-        st.error(f"Error Sync: {e}")
+        print(f"GitHub Sync Error: {e}")
         return False
 
 # --- FUNGSI DATABASE (CSV) ---
@@ -95,7 +99,7 @@ def save_to_db(data):
     df = pd.concat([df, new_df], ignore_index=True)
     df.to_csv(DB_FILE, index=False)
     
-    # Auto Sync ke GitHub
+    # Auto Sync Database ke GitHub
     push_to_github(DB_FILE, DB_FILE, f"Update DB: {data['Nama']}")
 
 def load_db():
@@ -162,6 +166,7 @@ def show_pdf_tools():
                     with col_down:
                         if st.button("⬇️", key=f"down_{i}", disabled=(i == len(st.session_state['pdf_merge_list']) - 1)):
                             items = st.session_state['pdf_merge_list']; items[i], items[i+1] = items[i+1], items[i]; st.rerun()
+                
                 if st.button("Gabungkan PDF", type="primary"):
                     try:
                         writer = PdfWriter()
@@ -170,13 +175,15 @@ def show_pdf_tools():
                             for page in reader.pages: writer.add_page(page)
                         buffer = io.BytesIO(); writer.write(buffer); buffer.seek(0)
                         st.success("Berhasil digabung!")
-                        st.download_button("📥 Download", data=buffer, file_name="merged_document.pdf", mime="application/pdf")
+                        st.download_button("📥 Download Hasil", data=buffer, file_name="merged_document.pdf", mime="application/pdf")
                     except Exception as e: st.error(f"Error: {e}")
 
     with tab2:
         st.subheader("Convert Word ke PDF")
+        st.info("ℹ️ Menggunakan LibreOffice untuk hasil akurat.")
         libreoffice_exists = shutil.which("libreoffice") or shutil.which("soffice")
         if not libreoffice_exists: st.error("❌ LibreOffice tidak ditemukan.")
+        
         uploaded_docxs = st.file_uploader("Pilih file Word (.docx)", type="docx", accept_multiple_files=True, key="word_to_pdf_uploader")
         if uploaded_docxs and st.button("Convert Semua ke PDF", type="primary"):
             if not libreoffice_exists: st.error("Gagal.")
@@ -184,6 +191,7 @@ def show_pdf_tools():
                 try:
                     zip_buffer = io.BytesIO()
                     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                        progress_bar = st.progress(0)
                         with tempfile.TemporaryDirectory() as temp_dir:
                             for i, docx_file in enumerate(uploaded_docxs):
                                 input_path = os.path.join(temp_dir, f"temp_{i}.docx")
@@ -192,6 +200,7 @@ def show_pdf_tools():
                                 output_pdf = os.path.join(temp_dir, f"temp_{i}.pdf")
                                 if os.path.exists(output_pdf):
                                     with open(output_pdf, "rb") as pdf_file: zf.writestr(f"{os.path.splitext(docx_file.name)[0]}.pdf", pdf_file.read())
+                                progress_bar.progress((i + 1) / len(uploaded_docxs))
                     zip_buffer.seek(0)
                     st.success("Berhasil convert!")
                     st.download_button("📥 Download ZIP", data=zip_buffer, file_name="converted_docs.zip", mime="application/zip")
@@ -283,8 +292,9 @@ def show_login_page():
 # --- HALAMAN GUEST ---
 def show_guest_view():
     st.title("👥 Rekap & Download Lembur")
+    st.markdown("---")
     df = load_db()
-    if df.empty: st.info("Belum ada data."); return
+    if df.empty: st.info("Belum ada data lembur yang tercatat."); return
     df['Timestamp'] = pd.to_datetime(df['Timestamp']); df['Bulan'] = df['Timestamp'].dt.to_period('M').astype(str)
     pilih_bulan = st.selectbox("Pilih Bulan", df['Bulan'].unique())
     df_show = df[df['Bulan'] == pilih_bulan]
@@ -295,6 +305,8 @@ def show_guest_view():
             if os.path.exists(row['FilePath']):
                 with open(row['FilePath'], "rb") as fp:
                     st.download_button("Download", data=fp, file_name=os.path.basename(row['FilePath']), key=f"dl_{i}")
+            else:
+                st.caption("⚠️ File tidak ditemukan di lokal server.")
 
 # --- HALAMAN ADMIN ---
 def show_admin_view():
@@ -309,7 +321,7 @@ def show_admin_view():
     elif menu == "Tools PDF": show_pdf_tools()
     elif menu == "Kalkulator Lembur": show_overtime_calculator()
 
-# --- SUB-MENU ADMIN: FORM (OTOMATIS) ---
+# --- SUB-MENU ADMIN: FORM (OTOMATIS + PUSH DOCX) ---
 def show_form_content():
     st.title("📄 Form Surat Tugas Lembur")
     st.markdown("---")
@@ -356,10 +368,17 @@ def show_form_content():
             file_path = os.path.join(DOCS_FOLDER, filename)
             doc.save(file_path)
             
-            # --- FIX FILE HILANG: AUTO SYNC KE GITHUB ---
-            if push_to_github(file_path, f"{DOCS_FOLDER}/{filename}", f"Add Surat: {pilih_nama}"):
-                st.toast("☁️ File synced to GitHub!", icon="✅")
+            # --- AUTO PUSH FILE DOCX KE GITHUB ---
+            # Repo path harus pakai slash biar jadi folder di GitHub
+            repo_file_path = f"{DOCS_FOLDER}/{filename}"
+            push_success = push_to_github(file_path, repo_file_path, f"Add Surat: {pilih_nama}")
             
+            if push_success:
+                st.toast("☁️ File berhasil di-backup ke GitHub!", icon="✅")
+            else:
+                st.toast("⚠️ File hanya tersimpan lokal (Gagal sync ke GitHub).", icon="⚠️")
+
+            # Save Database
             save_to_db({
                 "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Nama": pilih_nama, "NIK": detail['nik'],
                 "Bagian": detail['bagian'], "Lokasi": lokasi, "Periode_Lembur": tanggal_rapi, "Total_Jam": durasi_jam,
@@ -386,7 +405,6 @@ def show_dashboard():
     st.markdown("---")
     st.subheader("Rekap Per Karyawan")
     
-    # Group by Nama
     rekap = df_filtered.groupby('Nama')['Total_Jam'].sum().reset_index()
 
     for i, row in rekap.iterrows():
@@ -395,7 +413,6 @@ def show_dashboard():
             col_nama.write(f"**{row['Nama']}**")
             col_jam.metric("Jam", f"{row['Total_Jam']}")
             
-            # Ambil detail file orang ini
             files_person = df_filtered[df_filtered['Nama'] == row['Nama']]
             
             with col_aksi:
@@ -407,14 +424,11 @@ def show_dashboard():
                             if os.path.exists(file_p):
                                 with open(file_p, "rb") as fp:
                                     st.download_button(
-                                        label="Download Surat", 
-                                        data=fp, 
-                                        file_name=os.path.basename(file_p),
-                                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", 
-                                        key=f"dash_dl_{x}"
+                                        label="Download Surat", data=fp, file_name=os.path.basename(file_p),
+                                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key=f"dash_dl_{x}"
                                     )
                             else:
-                                st.caption("File hilang")
+                                st.caption("File tidak ditemukan")
         st.markdown("---")
 
 # --- SUB-MENU ADMIN: DATA & HAPUS (FIXED) ---
@@ -431,28 +445,17 @@ def show_data_management():
     st.subheader("Hapus Data")
     list_timestamp = df['Timestamp'].tolist()
     selected_ts = st.selectbox("Pilih Data (Waktu)", list_timestamp)
-    
     if st.button("Hapus Data Terpilih", type="secondary"):
-        # Ambil file path
         row_to_delete = df[df['Timestamp'] == selected_ts]
         if not row_to_delete.empty:
             file_to_delete = row_to_delete['FilePath'].values[0]
-            
-            # Hapus File Fisik
             if os.path.exists(file_to_delete):
-                try:
-                    os.remove(file_to_delete)
-                except Exception as e:
-                    st.warning(f"Gagal hapus file fisik: {e}")
-            
-            # Update DataFrame
+                try: os.remove(file_to_delete)
+                except: pass
             df_baru = df[df['Timestamp'] != selected_ts]
             df_baru.to_csv(DB_FILE, index=False)
-            
-            # Sync Perubahan ke GitHub
             push_to_github(DB_FILE, DB_FILE, f"Delete data: {selected_ts}")
-            
-            st.success("Data & File berhasil dihapus!")
+            st.success("Data berhasil dihapus!")
             st.rerun()
     
     st.markdown("---")
