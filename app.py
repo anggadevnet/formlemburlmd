@@ -6,7 +6,7 @@ import pandas as pd
 import os
 import tempfile
 import zipfile
-import pythoncom  # --- TAMBAHAN: Penting untuk fix error CoInitialize ---
+
 
 # --- IMPORT PDF (VERSI AMAN) ---
 try:
