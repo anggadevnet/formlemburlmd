@@ -411,17 +411,45 @@ def show_dashboard():
                                 st.caption("File hilang")
         st.markdown("---")
 
-# --- DATA MANAGEMENT ---
+# --- DATA MANAGEMENT (DENGAN DEBUG) ---
 def show_data_management():
     st.title("⚙️ Manajemen Data")
+    st.markdown("---")
+    
+    # Tombol Cek Koneksi
+    with st.expander("🔍 Cek Koneksi & Secrets"):
+        st.write("Mengecek status konfigurasi...")
+        try:
+            # Cek apakah secrets bisa kebaca
+            token = st.secrets["GITHUB_TOKEN"]
+            repo = st.secrets["REPO_NAME"]
+            st.success(f"✅ Secrets Terbaca! Repo: {repo}")
+            st.info(f"Token (Partial): {token[:4]}...{token[-4:]}")
+        except KeyError as e:
+            st.error(f"❌ Key '{e}' tidak ditemukan di Secrets.")
+            st.warning("Pastikan nama Key di Secrets persis: GITHUB_TOKEN dan REPO_NAME (Huruf Kapital).")
+        except Exception as e:
+            st.error(f"❌ Error lain: {e}")
+
+    st.markdown("---")
+    
+    # Tampil Data
     df = load_db()
-    st.dataframe(df)
-    if st.button("Sync Database ke GitHub", type="secondary"):
+    st.subheader("Data Lembur")
+    st.dataframe(df, use_container_width=True)
+    
+    st.markdown("---")
+    
+    # Tombol Sync Manual
+    if st.button("☁️ Sync Database ke GitHub (Manual)", type="primary"):
         if GITHUB_ENABLED:
-            push_to_github(DB_FILE, DB_FILE, "Manual DB Sync")
-            st.success("Sync sukses!")
+            success = push_to_github(DB_FILE, DB_FILE, "Manual DB Sync")
+            if success:
+                st.success("✅ Sync sukses! Data tersimpan permanen di repo.")
+            else:
+                st.error("❌ Gagal sync. Cek log error di atas atau console.")
         else:
-            st.error("GitHub Token belum disetting.")
+            st.error("❌ GitHub belum aktif. Periksa konfigurasi Secrets.")
 
 # --- MAIN ---
 def main():
