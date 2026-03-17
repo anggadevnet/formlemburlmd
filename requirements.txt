@@ -2,5 +2,3 @@ streamlit
 pandas
 docxtpl
 pypdf
-mammoth
-xhtml2pdf
