@@ -408,46 +408,75 @@ def show_dashboard():
                                 st.caption("File hilang")
         st.markdown("---")
 
-# --- DATA MANAGEMENT (DEBUG MODE) ---
+# --- DATA MANAGEMENT (SUPER DEBUG) ---
 def show_data_management():
     st.title("⚙️ Manajemen Data")
     df = load_db()
     st.dataframe(df)
-    
     st.markdown("---")
     
-    # --- DEBUGGING AREA (HAPUS NANTI KALAU UDAH SUKSES) ---
-    with st.expander("🐛 Klik Ini Buat Cek Kenapa Gagal"):
-        st.write("Mencoba akses Secrets...")
+    # Tombol Debug Super Spesifik
+    if st.button("🛠️ TEST KONEKSI GITHUB (DEBUG)", type="primary"):
+        st.write("---")
+        st.write("### 🔍 Hasil Debug:")
+        
+        # 1. Cek Secret
         try:
-            # Coba akses langsung mentah
             token = st.secrets["GITHUB_TOKEN"]
-            repo = st.secrets["REPO_NAME"]
-            st.success(f"✅ Secrets KETEMU! Key-nya bener.")
-            st.write(f"Repo: {repo}")
-            st.write(f"Token (Awalan): {token[:4]}...{token[-4:]}")
-        except KeyError as e:
-            st.error(f"❌ KeyError: Key '{e}' tidak ditemukan.")
-            st.warning("Artinya: Nama Key di Secrets salah atau belum disave.")
+            repo_name = st.secrets["REPO_NAME"]
+            st.write(f"1. ✅ Secrets Terbaca.")
+            st.write(f"   - Repo: `{repo_name}`")
+            st.write(f"   - Token Length: {len(token)} karakter") # Cek panjang token
+            
+            # 2. Cek Isi Token
+            if len(token) < 30:
+                st.error("TOKEN KEPENDEK! Kemungkinan cuma kebaca sebagian.")
+            elif " " in token:
+                st.error("TOKEN ADA SPASI! Hapus spasi di Secrets.")
+            else:
+                st.write("2. ⏳ Mencoba login ke GitHub...")
+                
+                # 3. Coba Login Pakai Library
+                try:
+                    from github import Github
+                    g = Github(token)
+                    
+                    # Coba ambil user login (Validasi paling aman)
+                    user = g.get_user()
+                    st.write(f"3. ✅ Login Sukses! User: `{user.login}`")
+                    
+                    # Coba akses repo
+                    try:
+                        repo = g.get_repo(repo_name)
+                        st.write(f"4. ✅ Akses Repo Sukses! Nama: `{repo.full_name}`")
+                        st.success("🎉 SEMUA SISTEM BERJALAN NORMAL!")
+                    except Exception as e_repo:
+                        st.error(f"4. ❌ Gagal Akses Repo. Error: {e_repo}")
+                        st.warning("Pastikan repo name benar: `username/repo`")
+                        
+                except Exception as e_git:
+                    st.error(f"3. ❌ GAGAL LOGIN KE GITHUB.")
+                    st.error(f"Pesan Error: {e_git}")
+                    st.markdown("""
+                    **Penyebab umum error login:**
+                    *   Token kadaluarsa.
+                    *   Token bukan tipe **Classic**.
+                    *   Scope **`repo`** tidak dicentang saat buat token.
+                    """)
+                    
         except Exception as e:
-            st.error(f"❌ Error Lain: {e}")
-    # -----------------------------------------------------
+            st.error(f"Error membaca Secrets: {e}")
 
     st.markdown("---")
-    st.subheader("Manual Sync")
-    
-    # Proses Sync
+    # Fungsi Sync Asli
     token, repo = get_github_secrets()
-    
     if token and repo:
-        if st.button("☁️ Sync Database ke GitHub", type="primary"):
-            with st.spinner("Proses upload..."):
-                if push_to_github(DB_FILE, DB_FILE, "Manual DB Sync"):
-                    st.success("✅ Sukses!")
-                else:
-                    st.error("Gagal. Cek expander debug di atas.")
-    else:
-        st.error("❌ Secrets belum siap. Cek di Expander Debug di atas kenapa.")
+        if st.button("☁️ Sync Database ke GitHub"):
+             # ... (sisa kode sync seperti biasa)
+             if push_to_github(DB_FILE, DB_FILE, "Manual DB Sync"):
+                 st.success("Sukses!")
+             else:
+                 st.error("Gagal.")
 
 # --- MAIN ---
 def main():
