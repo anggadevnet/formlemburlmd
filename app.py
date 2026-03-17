@@ -145,7 +145,7 @@ def show_pdf_tools():
     # --- TAB 2: WORD TO PDF (LIBREOFFICE ENGINE) ---
     with tab2:
         st.subheader("Convert Word ke PDF")
-        st.info("ℹ️ Menggunakan LibreOffice untuk hasil yang akurat sama dengan file asli.")
+       
         
         # Cek apakah libreoffice terinstall
         libreoffice_exists = shutil.which("libreoffice") or shutil.which("soffice")
