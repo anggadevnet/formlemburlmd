@@ -8,7 +8,6 @@ import tempfile
 import zipfile
 import subprocess
 import shutil
-import base64
 
 # --- IMPORT PDF (VERSI AMAN) ---
 try:
@@ -20,14 +19,6 @@ except ImportError:
         PDF_SUPPORT = True
     except:
         PDF_SUPPORT = False
-
-# --- GITHUB CONFIG ---
-try:
-    GITHUB_TOKEN = st.secrets["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"]
-    REPO_NAME = st.secrets["anggadevnet/formlemburlmd"]
-    GITHUB_ENABLED = True
-except:
-    GITHUB_ENABLED = False
 
 # --- CONFIG & DATABASE FILE ---
 DB_FILE = 'database_lembur.csv'
@@ -53,14 +44,25 @@ data_atasan = {
 }
 users_db = {"admin": "admin123", "hrd": "hrd123"}
 
-# --- FUNGSI GITHUB HELPER ---
+# --- FUNGSI GITHUB HELPER (LAZY LOADING) ---
+def get_github_secrets():
+    """Ambil secret saat fungsi dipanggil, bukan di awal script"""
+    try:
+        token = st.secrets["GITHUB_TOKEN"]
+        repo = st.secrets["REPO_NAME"]
+        return token, repo
+    except:
+        return None, None
+
 def push_to_github(file_path, repo_path, commit_message):
-    if not GITHUB_ENABLED:
+    token, repo_name = get_github_secrets()
+    if not token or not repo_name:
         return False
+    
     try:
         from github import Github, GithubException
-        g = Github(GITHUB_TOKEN)
-        repo = g.get_repo(REPO_NAME)
+        g = Github(token)
+        repo = g.get_repo(repo_name)
         with open(file_path, "rb") as f:
             content = f.read()
         try:
@@ -73,8 +75,7 @@ def push_to_github(file_path, repo_path, commit_message):
                 raise e
         return True
     except Exception as e:
-        # Jangan pakai st.warning di sini supaya ga mengganggu flow, log saja
-        print(f"GitHub Sync Error: {e}")
+        st.error(f"Error GitHub: {e}")
         return False
 
 # --- FUNGSI DATABASE ---
@@ -97,15 +98,14 @@ def save_to_db(data):
     new_df = pd.DataFrame([data])
     df = pd.concat([df, new_df], ignore_index=True)
     df.to_csv(DB_FILE, index=False)
-    if GITHUB_ENABLED:
-        push_to_github(DB_FILE, DB_FILE, f"Update DB: {data['Nama']}")
+    # Auto Sync
+    push_to_github(DB_FILE, DB_FILE, f"Update DB: {data['Nama']}")
 
 def load_db():
     if not os.path.exists(DB_FILE):
         return pd.DataFrame()
     try:
-        df = pd.read_csv(DB_FILE)
-        return df
+        return pd.read_csv(DB_FILE)
     except:
         return pd.DataFrame()
 
@@ -191,7 +191,7 @@ def show_pdf_tools():
         st.subheader("Convert Word ke PDF")
         st.info("ℹ️ Menggunakan LibreOffice untuk hasil akurat.")
         libreoffice_exists = shutil.which("libreoffice") or shutil.which("soffice")
-        if not libreoffice_exists: st.error("❌ LibreOffice tidak ditemukan. Cek `packages.txt`.")
+        if not libreoffice_exists: st.error("❌ LibreOffice tidak ditemukan.")
         
         uploaded_docxs = st.file_uploader("Pilih file Word (.docx)", type="docx", accept_multiple_files=True, key="word_to_pdf_uploader")
         if uploaded_docxs and st.button("Convert Semua ke PDF", type="primary"):
@@ -212,7 +212,7 @@ def show_pdf_tools():
                                         zf.writestr(f"{os.path.splitext(docx_file.name)[0]}.pdf", pdf_file.read())
                                 progress_bar.progress((i + 1) / len(uploaded_docxs))
                     zip_buffer.seek(0)
-                    st.success("Berhasil convert!")
+                    st.success("Berhasil!")
                     st.download_button("📥 Download ZIP", data=zip_buffer, file_name="converted_docs.zip", mime="application/zip")
                 except Exception as e: st.error(f"Error: {e}")
 
@@ -286,11 +286,9 @@ def show_guest_view():
 def show_admin_view():
     with st.sidebar:
         st.title(f"👋 Halo, {st.session_state.username}")
-        # FIX: Navigasi Kalkulator ditambahkan
         menu = st.radio("Navigation", ["Create Surat", "Dashboard", "Data & Hapus", "Tools PDF", "Kalkulator Lembur"])
         if st.button("Logout"): st.session_state.logged_in = False; st.rerun()
     
-    # FIX: Logic pemanggilan menu
     if menu == "Create Surat": show_form_content()
     elif menu == "Dashboard": show_dashboard()
     elif menu == "Data & Hapus": show_data_management()
@@ -344,9 +342,11 @@ def show_form_content():
             file_path = os.path.join(DOCS_FOLDER, filename)
             doc.save(file_path)
             
-            if GITHUB_ENABLED:
-                push_to_github(file_path, f"{DOCS_FOLDER}/{filename}", f"Add Surat: {pilih_nama}")
+            # Push file
+            if push_to_github(file_path, f"{DOCS_FOLDER}/{filename}", f"Add Surat: {pilih_nama}"):
+                st.toast("☁️ File synced to GitHub!", icon="✅")
             
+            # Save DB
             save_to_db({
                 "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Nama": pilih_nama, "NIK": detail['nik'],
                 "Bagian": detail['bagian'], "Lokasi": lokasi, "Periode_Lembur": tanggal_rapi, "Total_Jam": durasi_jam,
@@ -356,12 +356,12 @@ def show_form_content():
             buffer = io.BytesIO()
             doc.save(buffer)
             buffer.seek(0)
-            st.success("Data Tersimpan & Sinkron ke Cloud! 🎉")
+            st.success("Data Tersimpan! 🎉")
             st.download_button("📥 Download", data=buffer, file_name=filename)
         except Exception as e:
             st.error(f"Error: {e}")
 
-# --- DASHBOARD (FIX: Dipisah Per Karyawan) ---
+# --- DASHBOARD ---
 def show_dashboard():
     st.title("📊 Dashboard Rekap Lembur")
     df = load_db()
@@ -379,17 +379,14 @@ def show_dashboard():
     st.markdown("---")
     st.subheader("Rekap Per Karyawan")
     
-    # Group by Nama dulu biar kepisah
     rekap = df_filtered.groupby('Nama')['Total_Jam'].sum().reset_index()
 
     for i, row in rekap.iterrows():
-        # Buat container per orang
         with st.container():
             col_nama, col_jam, col_aksi = st.columns([2, 1, 1])
             col_nama.write(f"**{row['Nama']}**")
             col_jam.metric("Jam", f"{row['Total_Jam']}")
             
-            # Ambil detail file orang ini
             files_person = df_filtered[df_filtered['Nama'] == row['Nama']]
             
             with col_aksi:
@@ -411,45 +408,30 @@ def show_dashboard():
                                 st.caption("File hilang")
         st.markdown("---")
 
-# --- DATA MANAGEMENT (DENGAN DEBUG) ---
+# --- DATA MANAGEMENT (FIXED LOGIC) ---
 def show_data_management():
     st.title("⚙️ Manajemen Data")
-    st.markdown("---")
-    
-    # Tombol Cek Koneksi
-    with st.expander("🔍 Cek Koneksi & Secrets"):
-        st.write("Mengecek status konfigurasi...")
-        try:
-            # Cek apakah secrets bisa kebaca
-            token = st.secrets["GITHUB_TOKEN"]
-            repo = st.secrets["REPO_NAME"]
-            st.success(f"✅ Secrets Terbaca! Repo: {repo}")
-            st.info(f"Token (Partial): {token[:4]}...{token[-4:]}")
-        except KeyError as e:
-            st.error(f"❌ Key '{e}' tidak ditemukan di Secrets.")
-            st.warning("Pastikan nama Key di Secrets persis: GITHUB_TOKEN dan REPO_NAME (Huruf Kapital).")
-        except Exception as e:
-            st.error(f"❌ Error lain: {e}")
-
-    st.markdown("---")
-    
-    # Tampil Data
     df = load_db()
-    st.subheader("Data Lembur")
-    st.dataframe(df, use_container_width=True)
+    st.dataframe(df)
     
     st.markdown("---")
     
-    # Tombol Sync Manual
-    if st.button("☁️ Sync Database ke GitHub (Manual)", type="primary"):
-        if GITHUB_ENABLED:
-            success = push_to_github(DB_FILE, DB_FILE, "Manual DB Sync")
-            if success:
-                st.success("✅ Sync sukses! Data tersimpan permanen di repo.")
-            else:
-                st.error("❌ Gagal sync. Cek log error di atas atau console.")
-        else:
-            st.error("❌ GitHub belum aktif. Periksa konfigurasi Secrets.")
+    # Cek koneksi langsung saat menu ini dibuka
+    token, repo = get_github_secrets()
+    
+    if token and repo:
+        st.success(f"✅ GitHub Terhubung: {repo}")
+        
+        if st.button("☁️ Sync Database ke GitHub (Manual)", type="primary"):
+            with st.spinner("Mengupload ke GitHub..."):
+                if push_to_github(DB_FILE, DB_FILE, "Manual DB Sync"):
+                    st.success("✅ Sync sukses! Data aman di repo.")
+                else:
+                    st.error("❌ Gagal sync. Cek log error di layar.")
+    else:
+        st.error("❌ Secrets tidak ditemukan.")
+        st.info("Pastikan di Settings -> Secrets ada:")
+        st.code("GITHUB_TOKEN = 'token_kamu'\nREPO_NAME = 'username/repo'")
 
 # --- MAIN ---
 def main():
@@ -460,7 +442,6 @@ def main():
         if st.session_state.role == "Admin": 
             show_admin_view()
         else:
-            # Guest Menu
             with st.sidebar:
                 st.title("Menu Guest")
                 guest_menu = st.radio("Navigation", ["Rekap Lembur", "Tools PDF", "Kalkulator Lembur"])
