@@ -356,7 +356,7 @@ def show_form_content():
             file_path = os.path.join(DOCS_FOLDER, filename)
             doc.save(file_path)
             
-            # Push File ke GitHub
+            # --- FIX FILE HILANG: AUTO SYNC KE GITHUB ---
             if push_to_github(file_path, f"{DOCS_FOLDER}/{filename}", f"Add Surat: {pilih_nama}"):
                 st.toast("☁️ File synced to GitHub!", icon="✅")
             
