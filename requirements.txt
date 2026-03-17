@@ -2,4 +2,5 @@ streamlit
 pandas
 docxtpl
 pypdf
-# HAPUS pythoncom dan docx2pdf dari sini, karena tidak support di Streamlit Cloud
+mammoth
+xhtml2pdf
