@@ -103,27 +103,91 @@ def hitung_durasi(mulai_obj, selesai_obj):
     selesai_str = selesai_obj.strftime("%H:%M")
     return f"{mulai_str} - {selesai_str} , {teks_jam}", total_jam
 
-# --- FUNGSI FITUR TOOLS PDF (METODE LIBREOFFICE - 100% AKURAT) ---
+# --- FUNGSI FITUR TOOLS PDF (DENGAN FITUR UBAH URUTAN) ---
 def show_pdf_tools():
     st.title("🛠️ Tools PDF & File")
     st.markdown("---")
     
     tab1, tab2 = st.tabs(["📑 Merge PDF", "📝 Word to PDF"])
 
-    # --- TAB 1: MERGE PDF ---
+    # --- TAB 1: MERGE PDF (REVISI: BISA DIURUTKAN) ---
     with tab1:
         st.subheader("Gabungkan File PDF")
         
         if not PDF_SUPPORT:
             st.error("Library PDF (pypdf/PyPDF2) tidak ditemukan.")
         else:
-            uploaded_pdfs = st.file_uploader("Pilih beberapa file PDF", type="pdf", accept_multiple_files=True, key="merge_pdf_uploader")
-            
-            if uploaded_pdfs:
+            # Inisialisasi session state untuk list file jika belum ada
+            if 'pdf_merge_list' not in st.session_state:
+                st.session_state['pdf_merge_list'] = []
+
+            uploaded_pdfs = st.file_uploader(
+                "Pilih beberapa file PDF", 
+                type="pdf", 
+                accept_multiple_files=True, 
+                key="merge_pdf_uploader_widget"
+            )
+
+            # Logika Sinkronisasi:
+            # Jika ada file baru diupload, tambahkan ke list yang ada
+            # Jika file dihapus di uploader, buang dari list
+            if uploaded_pdfs is not None:
+                # Ambil nama file yang saat ini ada di uploader
+                uploader_names = {f.name for f in uploaded_pdfs}
+                stored_names = {f.name for f in st.session_state['pdf_merge_list']}
+
+                # Jika ada file baru yang belum ada di list, tambahkan
+                new_files = [f for f in uploaded_pdfs if f.name not in stored_names]
+                if new_files:
+                    st.session_state['pdf_merge_list'].extend(new_files)
+                
+                # Jika ada file di list yang tidak ada di uploader (dihapus), buang
+                st.session_state['pdf_merge_list'] = [
+                    f for f in st.session_state['pdf_merge_list'] if f.name in uploader_names
+                ]
+            else:
+                # Jika uploader dikosongkan
+                st.session_state['pdf_merge_list'] = []
+
+            # Tampilkan list dan tombol urut
+            if st.session_state['pdf_merge_list']:
+                st.info("🔄 Atur urutan file di bawah ini sebelum digabung:")
+                
+                # Container untuk list file
+                for i, pdf_file in enumerate(st.session_state['pdf_merge_list']):
+                    col_name, col_up, col_down = st.columns([6, 1, 1])
+                    
+                    with col_name:
+                        st.markdown(f"**{i+1}.** {pdf_file.name}")
+                    
+                    with col_up:
+                        # Tombol Naik (Disable kalau item paling atas)
+                        if st.button("⬆️", key=f"up_{i}", disabled=(i == 0)):
+                            # Swap dengan item sebelumnya
+                            items = st.session_state['pdf_merge_list']
+                            items[i], items[i-1] = items[i-1], items[i]
+                            st.session_state['pdf_merge_list'] = items
+                            st.rerun()
+                            
+                    with col_down:
+                        # Tombol Turun (Disable kalau item paling bawah)
+                        if st.button("⬇️", key=f"down_{i}", disabled=(i == len(st.session_state['pdf_merge_list']) - 1)):
+                            # Swap dengan item sesudahnya
+                            items = st.session_state['pdf_merge_list']
+                            items[i], items[i+1] = items[i+1], items[i]
+                            st.session_state['pdf_merge_list'] = items
+                            st.rerun()
+                
+                st.markdown("---")
+
                 if st.button("Gabungkan PDF", type="primary"):
                     try:
                         writer = PdfWriter()
-                        for pdf in uploaded_pdfs:
+                        
+                        # Gunakan list dari session state yang sudah diurutkan
+                        for pdf in st.session_state['pdf_merge_list']:
+                            # Penting: Reset pointer buffer ke awal
+                            pdf.seek(0) 
                             reader = PdfReader(pdf)
                             for page in reader.pages:
                                 writer.add_page(page)
@@ -132,7 +196,7 @@ def show_pdf_tools():
                         writer.write(buffer)
                         buffer.seek(0)
                         
-                        st.success(f"Berhasil menggabungkan {len(uploaded_pdfs)} file PDF!")
+                        st.success(f"Berhasil menggabungkan {len(st.session_state['pdf_merge_list'])} file PDF sesuai urutan!")
                         st.download_button(
                             label="📥 Download Hasil Gabungan",
                             data=buffer,
@@ -145,7 +209,7 @@ def show_pdf_tools():
     # --- TAB 2: WORD TO PDF (LIBREOFFICE ENGINE) ---
     with tab2:
         st.subheader("Convert Word ke PDF")
-       
+        st.info("ℹ️ Menggunakan LibreOffice untuk hasil yang akurat sama dengan file asli.")
         
         # Cek apakah libreoffice terinstall
         libreoffice_exists = shutil.which("libreoffice") or shutil.which("soffice")
@@ -171,24 +235,19 @@ def show_pdf_tools():
                                 for i, docx_file in enumerate(uploaded_docxs):
                                     status_text.text(f"Memproses file {i+1} dari {len(uploaded_docxs)}: {docx_file.name}")
                                     
-                                    # 1. Simpan file docx ke folder sementara
                                     base_name = os.path.splitext(docx_file.name)[0]
                                     input_path = os.path.join(temp_dir, f"temp_{i}.docx")
                                     
                                     with open(input_path, "wb") as f:
                                         f.write(docx_file.getbuffer())
                                     
-                                    # 2. Jalankan perintah LibreOffice Headless
-                                    # Perintah ini akan convert semua file di folder tsb ke PDF
                                     cmd = [
                                         "libreoffice", "--headless", "--convert-to", "pdf",
                                         "--outdir", temp_dir, input_path
                                     ]
                                     
-                                    # Jalankan subprocess
                                     process = subprocess.run(cmd, capture_output=True, text=True)
                                     
-                                    # 3. Cek hasilnya
                                     output_pdf = os.path.join(temp_dir, f"temp_{i}.pdf")
                                     
                                     if os.path.exists(output_pdf):
