@@ -6,7 +6,7 @@ import pandas as pd
 import os
 import tempfile
 import zipfile
-
+# --- IMPORT PYTHONCOM DIHAPUS DARI SINI AGAR TIDAK CRASH SAAT STARTUP ---
 
 # --- IMPORT PDF (VERSI AMAN) ---
 try:
@@ -26,6 +26,7 @@ if not os.path.exists(DOCS_FOLDER):
     os.makedirs(DOCS_FOLDER)
 
 # --- DATABASE KARYAWAN & ATASAN ---
+# Data NAFIRA NURZAHRA sudah ditambahkan
 data_karyawan = {
     "ANGGA SEPTIAN CAHYA": "09244925",
     "AZIS SAEFUDIN": "09244926",
@@ -140,18 +141,20 @@ def show_pdf_tools():
     with tab2:
         st.subheader("Convert Word ke PDF (Banyak File)")
         st.info("Pilih satu atau banyak file Word (.docx) sekaligus. Hasilnya akan dijadikan satu file ZIP.")
+        st.warning("⚠️ Note: Fitur ini memerlukan environment Windows (MS Word). Jika error di Streamlit Cloud, gunakan fitur ini di komputer lokal.")
         
         uploaded_docxs = st.file_uploader("Pilih file Word (.docx)", type="docx", accept_multiple_files=True, key="word_to_pdf_uploader")
         
         if uploaded_docxs:
             if st.button("Convert Semua ke PDF", type="primary"):
-                # --- PERBAIKAN ERROR COINITIALIZE ---
                 try:
-                    # Inisialisasi COM Library (Wajib untuk docx2pdf di Streamlit)
-                    pythoncom.CoInitialize()
-                    
-                    # Import library convert (diimpor di sini agar error handling lebih bagus)
+                    # --- PERBAIKAN: Import library di sini (Lazy Import) ---
+                    # Ini mencegah error saat app start, tapi akan error di sini jika di Linux
+                    import pythoncom 
                     from docx2pdf import convert
+                    
+                    # Inisialisasi COM Library
+                    pythoncom.CoInitialize()
                     
                     # Siapkan buffer untuk ZIP
                     zip_buffer = io.BytesIO()
@@ -206,14 +209,18 @@ def show_pdf_tools():
                     )
                         
                 except ImportError:
-                    st.error("Library 'docx2pdf' belum terinstall.")
-                    st.code("pip install docx2pdf")
+                    st.error("Library 'docx2pdf' atau 'pythoncom' belum terinstall.")
+                    st.code("pip install docx2pdf pywin32")
                     st.info("Note: Fitur ini membutuhkan Microsoft Word terinstall di komputer/server.")
                 except Exception as e:
-                    st.error(f"Gagal konversi: {str(e)}")
+                    st.error(f"Gagal konversi (Kemungkinan server bukan Windows): {str(e)}")
                 finally:
                     # Selalu uninitialize COM setelah selesai
-                    pythoncom.CoUninitialize()
+                    try:
+                        import pythoncom
+                        pythoncom.CoUninitialize()
+                    except:
+                        pass
                 # ------------------------------------
 
 # --- FITUR BARU: KALKULATOR LEMBUR ---
