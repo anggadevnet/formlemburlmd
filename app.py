@@ -24,21 +24,54 @@ except ImportError:
 DB_FILE = 'database_lembur.csv'
 DOCS_FOLDER = 'generated_docs'
 
-# --- SETUP FOLDER (FIX ERROR EXIST) ---
+# --- SETUP FOLDER ---
 if not os.path.exists(DOCS_FOLDER):
     os.makedirs(DOCS_FOLDER, exist_ok=True)
 
-# --- DATABASE KARYAWAN & ATASAN ---
-data_karyawan = {
-    "ANGGA SEPTIAN CAHYA": "09244925",
-    "AZIS SAEFUDIN": "09244926",
-    "NADINE PUSPITA SARI": "09244924",
-    "MOCH DIKI RAMDANI": "09244923",
-    "MOHAMMAD SYAIFUL ICHSAN": "09244931",
-    "MUKHLIS": "09244929",
-    "NAFIRA NURZAHRA": "09244914"
+# --- DATABASE UTAMA (MASTER DATA) ---
+# Sekarang satu dictionary besar berisi semua info, jadi ga perlu pencarian manual
+master_karyawan = {
+    # GRUP 1: ATASAN ERWIN - IT BUSINESS PARTNER
+    "ANGGA SEPTIAN CAHYA": {
+        "nik": "09244925",
+        "atasan": "ERWIN SETIAWAN",
+        "bagian": "IT Business Partner"
+    },
+    "NADINE PUSPITA SARI": {
+        "nik": "09244924",
+        "atasan": "ERWIN SETIAWAN",
+        "bagian": "IT Business Partner"
+    },
+    "MOHAMMAD SYAIFUL ICHSAN": {
+        "nik": "09244931",
+        "atasan": "ERWIN SETIAWAN",
+        "bagian": "IT Business Partner"
+    },
+    "NAFIRA NURZAHRA": {
+        "nik": "09244914",
+        "atasan": "ERWIN SETIAWAN",
+        "bagian": "IT Business Partner"
+    },
+
+    # GRUP 2: ATASAN ARIS - IT INFRASTRUCTURE
+    "MOCH DIKI RAMDANI": {
+        "nik": "09244923",
+        "atasan": "ARIS KURNIAWAN NOOR",
+        "bagian": "IT Infrastructure"
+    },
+    "MUKHLIS": {
+        "nik": "09244929",
+        "atasan": "ARIS KURNIAWAN NOOR",
+        "bagian": "IT Infrastructure"
+    },
+    "AZIS SAEFUDIN": {
+        "nik": "09244926",
+        "atasan": "ARIS KURNIAWAN NOOR",
+        "bagian": "IT Infrastructure"
+    }
 }
 
+# Data NIK Atasan (cuma buat referensi NIK doang)
 data_atasan = {
     "ERWIN SETIAWAN": "82233018",
     "ARIS KURNIAWAN NOOR": "89111077"
@@ -110,14 +143,13 @@ def show_pdf_tools():
     
     tab1, tab2 = st.tabs(["📑 Merge PDF", "📝 Word to PDF"])
 
-    # --- TAB 1: MERGE PDF (REVISI: BISA DIURUTKAN) ---
+    # --- TAB 1: MERGE PDF (BISA DIURUTKAN) ---
     with tab1:
         st.subheader("Gabungkan File PDF")
         
         if not PDF_SUPPORT:
             st.error("Library PDF (pypdf/PyPDF2) tidak ditemukan.")
         else:
-            # Inisialisasi session state untuk list file jika belum ada
             if 'pdf_merge_list' not in st.session_state:
                 st.session_state['pdf_merge_list'] = []
 
@@ -128,32 +160,23 @@ def show_pdf_tools():
                 key="merge_pdf_uploader_widget"
             )
 
-            # Logika Sinkronisasi:
-            # Jika ada file baru diupload, tambahkan ke list yang ada
-            # Jika file dihapus di uploader, buang dari list
             if uploaded_pdfs is not None:
-                # Ambil nama file yang saat ini ada di uploader
                 uploader_names = {f.name for f in uploaded_pdfs}
                 stored_names = {f.name for f in st.session_state['pdf_merge_list']}
 
-                # Jika ada file baru yang belum ada di list, tambahkan
                 new_files = [f for f in uploaded_pdfs if f.name not in stored_names]
                 if new_files:
                     st.session_state['pdf_merge_list'].extend(new_files)
                 
-                # Jika ada file di list yang tidak ada di uploader (dihapus), buang
                 st.session_state['pdf_merge_list'] = [
                     f for f in st.session_state['pdf_merge_list'] if f.name in uploader_names
                 ]
             else:
-                # Jika uploader dikosongkan
                 st.session_state['pdf_merge_list'] = []
 
-            # Tampilkan list dan tombol urut
             if st.session_state['pdf_merge_list']:
                 st.info("🔄 Atur urutan file di bawah ini sebelum digabung:")
                 
-                # Container untuk list file
                 for i, pdf_file in enumerate(st.session_state['pdf_merge_list']):
                     col_name, col_up, col_down = st.columns([6, 1, 1])
                     
@@ -161,18 +184,14 @@ def show_pdf_tools():
                         st.markdown(f"**{i+1}.** {pdf_file.name}")
                     
                     with col_up:
-                        # Tombol Naik (Disable kalau item paling atas)
                         if st.button("⬆️", key=f"up_{i}", disabled=(i == 0)):
-                            # Swap dengan item sebelumnya
                             items = st.session_state['pdf_merge_list']
                             items[i], items[i-1] = items[i-1], items[i]
                             st.session_state['pdf_merge_list'] = items
                             st.rerun()
                             
                     with col_down:
-                        # Tombol Turun (Disable kalau item paling bawah)
                         if st.button("⬇️", key=f"down_{i}", disabled=(i == len(st.session_state['pdf_merge_list']) - 1)):
-                            # Swap dengan item sesudahnya
                             items = st.session_state['pdf_merge_list']
                             items[i], items[i+1] = items[i+1], items[i]
                             st.session_state['pdf_merge_list'] = items
@@ -184,9 +203,7 @@ def show_pdf_tools():
                     try:
                         writer = PdfWriter()
                         
-                        # Gunakan list dari session state yang sudah diurutkan
                         for pdf in st.session_state['pdf_merge_list']:
-                            # Penting: Reset pointer buffer ke awal
                             pdf.seek(0) 
                             reader = PdfReader(pdf)
                             for page in reader.pages:
@@ -196,7 +213,7 @@ def show_pdf_tools():
                         writer.write(buffer)
                         buffer.seek(0)
                         
-                        st.success(f"Berhasil menggabungkan {len(st.session_state['pdf_merge_list'])} file PDF sesuai urutan!")
+                        st.success(f"Berhasil menggabungkan {len(st.session_state['pdf_merge_list'])} file PDF!")
                         st.download_button(
                             label="📥 Download Hasil Gabungan",
                             data=buffer,
@@ -206,12 +223,11 @@ def show_pdf_tools():
                     except Exception as e:
                         st.error(f"Terjadi error saat menggabungkan: {e}")
 
-    # --- TAB 2: WORD TO PDF (LIBREOFFICE ENGINE) ---
+    # --- TAB 2: WORD TO PDF (LIBREOFFICE) ---
     with tab2:
         st.subheader("Convert Word ke PDF")
         st.info("ℹ️ Menggunakan LibreOffice untuk hasil yang akurat sama dengan file asli.")
         
-        # Cek apakah libreoffice terinstall
         libreoffice_exists = shutil.which("libreoffice") or shutil.which("soffice")
         
         if not libreoffice_exists:
@@ -256,8 +272,6 @@ def show_pdf_tools():
                                         zf.writestr(f"{base_name}.pdf", pdf_data)
                                     else:
                                         st.warning(f"Gagal konversi: {docx_file.name}")
-                                        if process.stderr:
-                                            st.caption(f"Error log: {process.stderr[:100]}")
                                     
                                     progress_bar.progress((i + 1) / len(uploaded_docxs))
                                 
@@ -445,30 +459,52 @@ def show_admin_view():
     elif menu == "Tools PDF": show_pdf_tools()
     elif menu == "Kalkulator Lembur": show_overtime_calculator()
 
-# --- SUB-MENU ADMIN: FORM ---
+# --- SUB-MENU ADMIN: FORM (OTOMATIS PENUH) ---
 def show_form_content():
     st.title("📄 Form Surat Tugas Lembur")
     st.markdown("**PT. Lintas Media Danawa**")
     st.markdown("---")
 
+    # --- DATA KARYAWAN (AUTO FILL) ---
     st.subheader("Data Karyawan")
-    pilih_nama = st.selectbox("Pilih Nama Karyawan", list(data_karyawan.keys()))
-    nik_otomatis = data_karyawan[pilih_nama]
+    
+    # Ambil list nama dari master data
+    list_nama_karyawan = list(master_karyawan.keys())
+    pilih_nama = st.selectbox("Pilih Nama Karyawan", list_nama_karyawan)
+    
+    # Ambil data detail dari master dictionary
+    detail_karyawan = master_karyawan[pilih_nama]
+    nik_otomatis = detail_karyawan['nik']
+    atasan_otomatis = detail_karyawan['atasan']
+    bagian_otomatis = detail_karyawan['bagian']
+    
+    # Tampilkan NIK (Lock)
     st.text_input("NIK (Otomatis)", value=nik_otomatis, disabled=True)
 
+    # --- DATA ATASAN (AUTO FILL) ---
     st.subheader("Data Atasan")
-    pilih_atasan = st.selectbox("Pilih Atasan Penyetuju", list(data_atasan.keys()))
-    nik_bos_otomatis = data_atasan[pilih_atasan]
+    
+    # Tampilkan Nama Atasan (Lock)
+    st.text_input("Atasan Penyetuju (Otomatis)", value=atasan_otomatis, disabled=True)
+    
+    # Ambil NIK Atasan dari data_atasan
+    nik_bos_otomatis = data_atasan[atasan_otomatis]
     st.text_input("NIK Atasan (Otomatis)", value=nik_bos_otomatis, disabled=True)
 
     st.markdown("---")
+
+    # --- DETAIL LEMBUR ---
     st.subheader("Detail Lembur")
     col1, col2 = st.columns(2)
 
     with col1:
-        bagian = st.selectbox("Bagian/Divisi", ["IT Business Partner", "IT Infrastructure"])
+        # Bagian otomatis terisi dan dikunci
+        idx_bagian = ["IT Business Partner", "IT Infrastructure"].index(bagian_otomatis)
+        st.selectbox("Bagian/Divisi", ["IT Business Partner", "IT Infrastructure"], index=idx_bagian, disabled=True)
+        
         st.write("**Periode Lembur:**")
         tanggal_range = st.date_input("Pilih Rentang Tanggal", value=(datetime.today(), datetime.today()))
+        
     with col2:
         lokasi = st.selectbox("Lokasi Kerja", ["Remote (Work From Home)", "Arcadia", "TB. Simatupang"])
         jam_mulai = st.time_input("Jam Mulai", value=datetime.strptime("17:00", "%H:%M").time())
@@ -496,9 +532,9 @@ def show_form_content():
             uraian_bold = RichText(uraian, bold=True)
             
             context = {
-                'nama': pilih_nama, 'nik': nik_otomatis, 'bagian': bagian, 'lokasi': lokasi,
+                'nama': pilih_nama, 'nik': nik_otomatis, 'bagian': bagian_otomatis, 'lokasi': lokasi,
                 'hari_tanggal': tanggal_rapi, 'durasi': durasi_text, 'pelaksanaan_lembur': uraian_bold,
-                'namabos': pilih_atasan, 'nikbos': nik_bos_otomatis, 'tglacc': tgl_acc_rapi
+                'namabos': atasan_otomatis, 'nikbos': nik_bos_otomatis, 'tglacc': tgl_acc_rapi
             }
             
             doc.render(context)
@@ -509,8 +545,8 @@ def show_form_content():
             
             data_simpan = {
                 "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Nama": pilih_nama, "NIK": nik_otomatis,
-                "Bagian": bagian, "Lokasi": lokasi, "Periode_Lembur": tanggal_rapi, "Total_Jam": durasi_jam,
-                "Uraian": uraian, "Atasan": pilih_atasan, "FilePath": file_path
+                "Bagian": bagian_otomatis, "Lokasi": lokasi, "Periode_Lembur": tanggal_rapi, "Total_Jam": durasi_jam,
+                "Uraian": uraian, "Atasan": atasan_otomatis, "FilePath": file_path
             }
             save_to_db(data_simpan)
             
