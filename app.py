@@ -48,7 +48,7 @@ users_db = {"admin": "admin123", "hrd": "hrd123"}
 def get_github_secrets():
     """Ambil secret saat fungsi dipanggil, bukan di awal script"""
     try:
-        token = st.secrets["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"]
+        token = st.secrets["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"]
         repo = st.secrets["anggadevnet/formlemburlmd"]
         return token, repo
     except:
