@@ -73,7 +73,8 @@ def push_to_github(file_path, repo_path, commit_message):
                 raise e
         return True
     except Exception as e:
-        st.warning(f"GitHub Sync Error: {e}")
+        # Jangan pakai st.warning di sini supaya ga mengganggu flow, log saja
+        print(f"GitHub Sync Error: {e}")
         return False
 
 # --- FUNGSI DATABASE ---
@@ -285,12 +286,16 @@ def show_guest_view():
 def show_admin_view():
     with st.sidebar:
         st.title(f"👋 Halo, {st.session_state.username}")
-        menu = st.radio("Navigation", ["Create Surat", "Dashboard", "Data & Hapus", "Tools PDF"])
+        # FIX: Navigasi Kalkulator ditambahkan
+        menu = st.radio("Navigation", ["Create Surat", "Dashboard", "Data & Hapus", "Tools PDF", "Kalkulator Lembur"])
         if st.button("Logout"): st.session_state.logged_in = False; st.rerun()
+    
+    # FIX: Logic pemanggilan menu
     if menu == "Create Surat": show_form_content()
     elif menu == "Dashboard": show_dashboard()
     elif menu == "Data & Hapus": show_data_management()
     elif menu == "Tools PDF": show_pdf_tools()
+    elif menu == "Kalkulator Lembur": show_overtime_calculator()
 
 # --- FORM CONTENT (Auto Fill) ---
 def show_form_content():
@@ -356,25 +361,55 @@ def show_form_content():
         except Exception as e:
             st.error(f"Error: {e}")
 
-# --- DASHBOARD ---
+# --- DASHBOARD (FIX: Dipisah Per Karyawan) ---
 def show_dashboard():
-    st.title("📊 Dashboard")
+    st.title("📊 Dashboard Rekap Lembur")
     df = load_db()
-    if df.empty: st.warning("Kosong"); return
+    if df.empty: 
+        st.warning("Data masih kosong.")
+        return
+
     df['Timestamp'] = pd.to_datetime(df['Timestamp'])
     df['Bulan'] = df['Timestamp'].dt.to_period('M').astype(str)
-    pilih_bulan = st.selectbox("Bulan", df['Bulan'].unique())
+    
+    list_bulan = df['Bulan'].unique()
+    pilih_bulan = st.selectbox("Pilih Bulan", list_bulan)
     df_filtered = df[df['Bulan'] == pilih_bulan]
     
-    st.metric("Total Jam", f"{df_filtered['Total_Jam'].sum()} Jam")
-    for i, row in df_filtered.iterrows():
+    st.markdown("---")
+    st.subheader("Rekap Per Karyawan")
+    
+    # Group by Nama dulu biar kepisah
+    rekap = df_filtered.groupby('Nama')['Total_Jam'].sum().reset_index()
+
+    for i, row in rekap.iterrows():
+        # Buat container per orang
         with st.container():
-            st.write(f"**{row['Nama']}** | {row['Periode_Lembur']} ({row['Total_Jam']} Jam)")
-            if os.path.exists(row['FilePath']):
-                with open(row['FilePath'], "rb") as fp:
-                    st.download_button("Download", data=fp, file_name=os.path.basename(row['FilePath']), key=f"dd_{i}")
-            else:
-                st.caption("File tidak ditemukan di storage lokal (mungkin perlu sync)")
+            col_nama, col_jam, col_aksi = st.columns([2, 1, 1])
+            col_nama.write(f"**{row['Nama']}**")
+            col_jam.metric("Jam", f"{row['Total_Jam']}")
+            
+            # Ambil detail file orang ini
+            files_person = df_filtered[df_filtered['Nama'] == row['Nama']]
+            
+            with col_aksi:
+                with st.expander("Detail"):
+                    if not files_person.empty:
+                        for x, data_row in files_person.iterrows():
+                            st.write(f"Tgl: {data_row['Periode_Lembur']} ({data_row['Total_Jam']} Jam)")
+                            file_p = data_row['FilePath']
+                            if os.path.exists(file_p):
+                                with open(file_p, "rb") as fp:
+                                    st.download_button(
+                                        label="Download Surat", 
+                                        data=fp, 
+                                        file_name=os.path.basename(file_p),
+                                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", 
+                                        key=f"dash_dl_{x}"
+                                    )
+                            else:
+                                st.caption("File hilang")
+        st.markdown("---")
 
 # --- DATA MANAGEMENT ---
 def show_data_management():
@@ -394,12 +429,18 @@ def main():
     if 'logged_in' not in st.session_state: st.session_state.logged_in = False
     if not st.session_state.logged_in: show_login_page()
     else:
-        if st.session_state.role == "Admin": show_admin_view()
+        if st.session_state.role == "Admin": 
+            show_admin_view()
         else:
+            # Guest Menu
             with st.sidebar:
                 st.title("Menu Guest")
+                guest_menu = st.radio("Navigation", ["Rekap Lembur", "Tools PDF", "Kalkulator Lembur"])
                 if st.button("Logout"): st.session_state.logged_in = False; st.rerun()
-            show_guest_view()
+            
+            if guest_menu == "Rekap Lembur": show_guest_view()
+            elif guest_menu == "Tools PDF": show_pdf_tools()
+            elif guest_menu == "Kalkulator Lembur": show_overtime_calculator()
 
 if __name__ == "__main__":
     main()
