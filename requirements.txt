@@ -1,4 +1,5 @@
 streamlit
 pandas
 docxtpl
-PyGithub
+pypdf
+# HAPUS pythoncom dan docx2pdf dari sini, karena tidak support di Streamlit Cloud
