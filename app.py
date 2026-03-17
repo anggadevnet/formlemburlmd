@@ -25,7 +25,6 @@ DB_FILE = 'database_lembur.csv'
 DOCS_FOLDER = 'generated_docs'
 
 # --- SETUP FOLDER ---
-# Ini bakal auto create folder kalau ga ada (misal dihapus pas bulk delete)
 if not os.path.exists(DOCS_FOLDER):
     os.makedirs(DOCS_FOLDER, exist_ok=True)
 
@@ -66,12 +65,10 @@ def push_to_github(file_path, repo_path, commit_message):
         with open(file_path, "rb") as f:
             content = f.read()
         try:
-            # Update jika file sudah ada
             contents = repo.get_contents(repo_path)
             repo.update_file(contents.path, commit_message, content, contents.sha, branch="main")
         except GithubException as e:
             if e.status == 404:
-                # Create jika file belum ada (auto create folder juga)
                 repo.create_file(repo_path, commit_message, content, branch="main")
             else:
                 raise e
@@ -289,24 +286,54 @@ def show_login_page():
             if st.button("Login as Guest", use_container_width=True):
                 st.session_state.logged_in = True; st.session_state.role = "Guest"; st.session_state.username = "Guest"; st.rerun()
 
-# --- HALAMAN GUEST ---
+# --- HALAMAN GUEST (DENGAN FILTER NAMA) ---
 def show_guest_view():
     st.title("👥 Rekap & Download Lembur")
     st.markdown("---")
     df = load_db()
-    if df.empty: st.info("Belum ada data lembur yang tercatat."); return
-    df['Timestamp'] = pd.to_datetime(df['Timestamp']); df['Bulan'] = df['Timestamp'].dt.to_period('M').astype(str)
-    pilih_bulan = st.selectbox("Pilih Bulan", df['Bulan'].unique())
-    df_show = df[df['Bulan'] == pilih_bulan]
-    st.metric("Total Jam", f"{df_show['Total_Jam'].sum()} Jam")
-    for i, row in df_show.iterrows():
-        with st.container():
-            st.write(f"**{row['Nama']}** | {row['Periode_Lembur']}")
-            if os.path.exists(row['FilePath']):
-                with open(row['FilePath'], "rb") as fp:
-                    st.download_button("Download", data=fp, file_name=os.path.basename(row['FilePath']), key=f"dl_{i}")
-            else:
-                st.caption("⚠️ File tidak ditemukan di lokal server.")
+    if df.empty:
+        st.info("Belum ada data lembur yang tercatat.")
+        return
+
+    df['Timestamp'] = pd.to_datetime(df['Timestamp'])
+    df['Bulan'] = df['Timestamp'].dt.to_period('M').astype(str)
+    list_bulan = df['Bulan'].unique()
+    pilih_bulan = st.selectbox("Pilih Bulan", list_bulan)
+    
+    # Filter bulan
+    df_filtered_month = df[df['Bulan'] == pilih_bulan]
+    
+    # --- FITUR BARU: FILTER KARYAWAN ---
+    list_nama = df_filtered_month['Nama'].unique()
+    pilih_nama = st.selectbox("Pilih Karyawan", ["Semua"] + list(list_nama))
+
+    # Terapkan filter
+    if pilih_nama == "Semua": 
+        df_show = df_filtered_month
+    else: 
+        df_show = df_filtered_month[df_filtered_month['Nama'] == pilih_nama]
+
+    st.markdown("---")
+    if not df_show.empty:
+        total_jam = df_show['Total_Jam'].sum()
+        st.metric(f"Total Jam Lembur", f"{total_jam} Jam")
+        st.markdown("---")
+        for i, row in df_show.iterrows():
+            with st.container():
+                col_info, col_btn = st.columns([3, 1])
+                with col_info:
+                    st.write(f"**{row['Nama']}** | {row['Periode_Lembur']}")
+                    st.caption(f"Durasi: {row['Total_Jam']} Jam | Lokasi: {row['Lokasi']}")
+                with col_btn:
+                    file_path = row['FilePath']
+                    if os.path.exists(file_path):
+                        with open(file_path, "rb") as fp:
+                            st.download_button(
+                                label="📥 Download", data=fp, file_name=os.path.basename(file_path),
+                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key=f"dl_{i}"
+                            )
+                    else: st.warning("File hilang")
+                st.markdown("---")
 
 # --- HALAMAN ADMIN ---
 def show_admin_view():
@@ -369,7 +396,6 @@ def show_form_content():
             doc.save(file_path)
             
             # --- AUTO PUSH FILE DOCX KE GITHUB ---
-            # Repo path harus pakai slash biar jadi folder di GitHub
             repo_file_path = f"{DOCS_FOLDER}/{filename}"
             push_success = push_to_github(file_path, repo_file_path, f"Add Surat: {pilih_nama}")
             
