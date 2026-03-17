@@ -1,3 +1,4 @@
 libreoffice-writer
 fonts-liberation
 fonts-crosextra-carlito
+ttf-mscorefonts-installer
