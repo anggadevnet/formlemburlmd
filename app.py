@@ -8,7 +8,6 @@ import tempfile
 import zipfile
 import subprocess
 import shutil
-import re
 
 # --- IMPORT PDF (VERSI AMAN) ---
 try:
@@ -237,14 +236,7 @@ def show_overtime_calculator():
         
         def format_td(td):
             total_sec = td.total_seconds(); h = int(total_sec // 3600); m = int((total_sec % 3600) // 60)
-            if h > 0 and m > 0:
-                return f"{h} Jam {m} Menit"
-            elif h > 0:
-                return f"{h} Jam"
-            elif m > 0:
-                return f"{m} Menit"
-            else:
-                return "0 Jam"
+            return f"{h} Jam {m} Menit"
 
         if is_weekend:
             case_name = "CASE 4: Lembur di Hari Libur / Weekend"
@@ -323,36 +315,15 @@ def show_guest_view():
 
     st.markdown("---")
     if not df_show.empty:
-        # Hitung total jam dan menit dari semua data
-        total_jam = 0
-        total_menit = 0
-        
-        # Ambil data unik per karyawan untuk ditampilkan
-        for _, row in df_show.iterrows():
-            # Parse durasi dari Periode_Lembur atau hitung ulang?
-            # Kita perlu menghitung ulang dari jam_mulai dan jam_selesai? 
-            # Karena database hanya nyimpan Total_Jam (integer), kita ambil dari situ dulu
-            # Tapi karena Total_Jam cuma integer, kita gabung dengan asumsi menit 0
-            # Untuk display yang akurat, kita perlu simpan detail
-            jam = int(row['Total_Jam'])
-            total_jam += jam
-        
-        # Tampilkan total
-        if total_menit > 0:
-            total_display = f"{total_jam} jam {total_menit} menit"
-        else:
-            total_display = f"{total_jam} jam"
-        
-        st.metric(f"Total Jam Lembur", total_display)
+        total_jam = df_show['Total_Jam'].sum()
+        st.metric(f"Total Jam Lembur", f"{total_jam} Jam")
         st.markdown("---")
         for i, row in df_show.iterrows():
             with st.container():
                 col_info, col_btn = st.columns([3, 1])
                 with col_info:
                     st.write(f"**{row['Nama']}** | {row['Periode_Lembur']}")
-                    # Tampilkan durasi dengan format jam + menit
-                    jam_only = int(row['Total_Jam'])
-                    st.caption(f"Durasi: {jam_only} jam | Lokasi: {row['Lokasi']}")
+                    st.caption(f"Durasi: {row['Total_Jam']} Jam | Lokasi: {row['Lokasi']}")
                 with col_btn:
                     file_path = row['FilePath']
                     if os.path.exists(file_path):
@@ -460,42 +431,30 @@ def show_dashboard():
     st.markdown("---")
     st.subheader("Rekap Per Karyawan")
     
-    # Ambil data unique per karyawan
-    karyawan_list = df_filtered['Nama'].unique()
-    
-    for nama in karyawan_list:
-        df_karyawan = df_filtered[df_filtered['Nama'] == nama]
-        
-        # Hitung total jam dari semua data (karena hanya nyimpan integer jam)
-        total_jam = df_karyawan['Total_Jam'].sum()
-        
-        # Format total durasi (karena hanya jam, tidak bisa tampilkan menit)
-        if total_jam == int(total_jam):
-            total_durasi_tampil = f"{int(total_jam)} jam"
-        else:
-            total_durasi_tampil = f"{total_jam} jam"
-        
+    rekap = df_filtered.groupby('Nama')['Total_Jam'].sum().reset_index()
+
+    for i, row in rekap.iterrows():
         with st.container():
             col_nama, col_jam, col_aksi = st.columns([2, 1, 1])
-            col_nama.write(f"**{nama}**")
-            col_jam.metric("Total Jam", total_durasi_tampil)
+            col_nama.write(f"**{row['Nama']}**")
+            col_jam.metric("Jam", f"{row['Total_Jam']}")
+            
+            files_person = df_filtered[df_filtered['Nama'] == row['Nama']]
             
             with col_aksi:
                 with st.expander("Detail"):
-                    for x, data_row in df_karyawan.iterrows():
-                        jam_only = int(data_row['Total_Jam'])
-                        st.write(f"📅 Tgl: {data_row['Periode_Lembur']}")
-                        st.write(f"⏱️ Durasi: {jam_only} jam")
-                        file_p = data_row['FilePath']
-                        if os.path.exists(file_p):
-                            with open(file_p, "rb") as fp:
-                                st.download_button(
-                                    label="📥 Download Surat", data=fp, file_name=os.path.basename(file_p),
-                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key=f"dash_dl_{x}"
-                                )
-                        else:
-                            st.caption("⚠️ File tidak ditemukan")
-                        st.markdown("---")
+                    if not files_person.empty:
+                        for x, data_row in files_person.iterrows():
+                            st.write(f"Tgl: {data_row['Periode_Lembur']} ({data_row['Total_Jam']} Jam)")
+                            file_p = data_row['FilePath']
+                            if os.path.exists(file_p):
+                                with open(file_p, "rb") as fp:
+                                    st.download_button(
+                                        label="Download Surat", data=fp, file_name=os.path.basename(file_p),
+                                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key=f"dash_dl_{x}"
+                                    )
+                            else:
+                                st.caption("File tidak ditemukan")
         st.markdown("---")
 
 # --- SUB-MENU ADMIN: DATA & HAPUS (FIXED) ---
