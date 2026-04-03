@@ -8,7 +8,6 @@ import tempfile
 import zipfile
 import subprocess
 import shutil
-import re
 
 # --- IMPORT PDF (VERSI AMAN) ---
 try:
