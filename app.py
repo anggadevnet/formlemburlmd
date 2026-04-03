@@ -205,7 +205,7 @@ def show_pdf_tools():
 
 # --- FITUR KALKULATOR LEMBUR (LENGKAP) ---
 def show_overtime_calculator():
-    st.title("⏱️ Input TALENTA Durasi Lembur")
+    st.title("⏱️ Kalkulator Durasi Lembur")
     st.markdown("---")
     st.markdown("Isi data dibawah ini untuk menghitung durasi lembur otomatis.")
     
@@ -339,14 +339,14 @@ def show_guest_view():
 def show_admin_view():
     with st.sidebar:
         st.title(f"👋 Halo, {st.session_state.username}")
-        menu = st.radio("Navigation", ["Create Surat", "Dashboard", "Data & Hapus", "Tools PDF", "Input Lembur TALENTA"])
+        menu = st.radio("Navigation", ["Create Surat", "Dashboard", "Data & Hapus", "Tools PDF", "Kalkulator Lembur"])
         if st.button("Logout"): st.session_state.logged_in = False; st.rerun()
 
     if menu == "Create Surat": show_form_content()
     elif menu == "Dashboard": show_dashboard()
     elif menu == "Data & Hapus": show_data_management()
     elif menu == "Tools PDF": show_pdf_tools()
-    elif menu == "Input Lembur Talenta": show_overtime_calculator()
+    elif menu == "Kalkulator Lembur": show_overtime_calculator()
 
 # --- SUB-MENU ADMIN: FORM (OTOMATIS + PUSH DOCX) ---
 def show_form_content():
@@ -510,12 +510,13 @@ def main():
         else:
             with st.sidebar:
                 st.title("Menu Guest")
-                guest_menu = st.radio("Navigation", ["Rekap Lembur", "Tools PDF", "Input Lembur Talenta"])
+                guest_menu = st.radio("Navigation", ["Rekap Lembur", "Tools PDF", "Kalkulator Lembur"])
                 if st.button("Logout"): st.session_state.logged_in = False; st.rerun()
             
             if guest_menu == "Rekap Lembur": show_guest_view()
             elif guest_menu == "Tools PDF": show_pdf_tools()
-            elif guest_menu == "Input Lembur Talenta": show_overtime_calculator()
+            elif guest_menu == "Kalkulator Lembur": show_overtime_calculator()
 
 if __name__ == "__main__":
     main()
+
