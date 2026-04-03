@@ -129,7 +129,7 @@ def hitung_durasi(mulai_obj, selesai_obj):
     total_menit = int((delta.total_seconds() % 3600) // 60)
     teks_jam = f"{total_jam} jam"
     if total_menit > 0: teks_jam += f" {total_menit} menit"
-    return f"{mulai_obj.strftime('%H:%M')} - {selesai_obj.strftime('%H:%M')} , {teks_jam}", total_jam + (total_menit / 60.0)
+    return f"{mulai_obj.strftime('%H:%M')} - {selesai_obj.strftime('%H:%M')} , {teks_jam}", total_jam + (total_menit / 60.0)  # <== PERUBAHAN: simpan dalam desimal biar menitnya gak ilang
 
 # --- FUNGSI TOOLS PDF ---
 def show_pdf_tools():
@@ -269,197 +269,6 @@ def show_overtime_calculator():
         st.success(f"**TOTAL LEMBUR: {format_td(total_duration)}**")
         st.caption(f"Kategori: {case_name}")
 
-# --- MENU BARU: KALKULATOR GAPOK + LEMBUR ---
-def show_gaji_calculator():
-    st.title("💰 Kalkulator Gaji Pokok + Lembur")
-    st.markdown("---")
-    st.markdown("Hitung gaji bersih berdasarkan gaji pokok, jam lembur, dan potongan BPJS.")
-
-    # Inisialisasi session state untuk menyimpan data lembur
-    if 'data_lembur' not in st.session_state:
-        st.session_state.data_lembur = []
-
-    # Libur Nasional 2026 (format DD/MM)
-    libur_nasional = ["01/01", "17/02", "03/04", "01/05", "17/08", "25/12"]
-
-    def get_upah_per_jam(gaji):
-        return gaji / 173
-
-    def get_eff_jam(jam):
-        return jam - (jam // 5)
-
-    def calc_weekday(eff_jam, up_per_jam):
-        total = 0
-        if eff_jam >= 1:
-            total += 1.5 * up_per_jam
-        if eff_jam >= 2:
-            jam2_8 = min(eff_jam - 1, 7)
-            total += jam2_8 * 2 * up_per_jam
-        if eff_jam >= 9:
-            total += 1 * 3 * up_per_jam
-        if eff_jam >= 10:
-            total += (eff_jam - 9) * 4 * up_per_jam
-        return round(total)
-
-    def calc_weekend(eff_jam, up_per_jam):
-        total = 0
-        if eff_jam <= 8:
-            total = eff_jam * 2 * up_per_jam
-        elif eff_jam == 9:
-            total = (8 * 2 * up_per_jam) + (1 * 3 * up_per_jam)
-        else:
-            total = (8 * 2 * up_per_jam) + (1 * 3 * up_per_jam) + ((eff_jam - 9) * 4 * up_per_jam)
-        return round(total)
-
-    def cek_tipe(tgl_obj, force_libur):
-        if force_libur:
-            return "Weekend (Paksa)"
-        ddmm = tgl_obj.strftime("%d/%m")
-        if ddmm in libur_nasional:
-            return "Weekend (Libur)"
-        if tgl_obj.weekday() >= 5:  # Sabtu=5, Minggu=6
-            return "Weekend"
-        return "Weekday"
-
-    # Input Gaji Pokok
-    col1, col2 = st.columns(2)
-    with col1:
-        gaji_pokok = st.number_input("💰 Gaji Pokok", min_value=0, value=5447000, step=100000, format="%d")
-    with col2:
-        st.metric("Upah per Jam", f"Rp {get_upah_per_jam(gaji_pokok):,.0f}")
-
-    st.markdown("---")
-    st.subheader("➕ Tambah Data Lembur")
-
-    col_tgl1, col_tgl2 = st.columns(2)
-    with col_tgl1:
-        tgl_mulai = st.date_input("Tanggal Mulai", value=date.today())
-    with col_tgl2:
-        tgl_selesai = st.date_input("Tanggal Selesai", value=date.today())
-
-    col_jam1, col_jam2 = st.columns(2)
-    with col_jam1:
-        jam_mulai = st.time_input("Jam Mulai", value=datetime.strptime("17:00", "%H:%M").time())
-    with col_jam2:
-        jam_selesai = st.time_input("Jam Selesai", value=datetime.strptime("22:00", "%H:%M").time())
-
-    force_libur = st.checkbox("Paksa Libur (Cuti)")
-
-    if st.button("➕ TAMBAH DATA LEMBUR", type="primary"):
-        # Handle overnight
-        d1 = datetime.combine(tgl_mulai, jam_mulai)
-        d2 = datetime.combine(tgl_selesai, jam_selesai)
-        
-        if d2 <= d1:
-            d2 += timedelta(days=1)
-        
-        # Split per hari
-        current = d1
-        while current < d2:
-            end_of_day = datetime(current.year, current.month, current.day, 23, 59, 59)
-            segment_end = min(d2, end_of_day)
-            hours = (segment_end - current).total_seconds() / 3600
-            
-            st.session_state.data_lembur.append({
-                "tanggal": current.date(),
-                "tipe": cek_tipe(current, force_libur),
-                "raw_jam": hours,
-                "is_weekend": "Weekend" in cek_tipe(current, force_libur)
-            })
-            
-            current = datetime(current.year, current.month, current.day, 0, 0, 0) + timedelta(days=1)
-        
-        st.success("Data lembur berhasil ditambahkan!")
-        st.rerun()
-
-    # Tabel Data Lembur
-    st.markdown("---")
-    st.subheader("📋 Data Lembur")
-    
-    if st.session_state.data_lembur:
-        # Buat dataframe untuk ditampilkan
-        df_tampil = pd.DataFrame(st.session_state.data_lembur)
-        df_tampil['eff_jam'] = df_tampil['raw_jam'].apply(lambda x: get_eff_jam(int(x)))
-        up_per_jam = get_upah_per_jam(gaji_pokok)
-        df_tampil['upah'] = df_tampil.apply(
-            lambda row: calc_weekend(row['eff_jam'], up_per_jam) if row['is_weekend'] else calc_weekday(row['eff_jam'], up_per_jam),
-            axis=1
-        )
-        
-        # Tampilkan tabel dengan format yang rapi
-        st.dataframe(
-            df_tampil[['tanggal', 'tipe', 'raw_jam', 'eff_jam', 'upah']].rename(columns={
-                'tanggal': 'Tanggal', 'tipe': 'Tipe', 'raw_jam': 'Raw Jam', 'eff_jam': 'Jam Efektif', 'upah': 'Upah'
-            }),
-            use_container_width=True,
-            column_config={
-                'Upah': st.column_config.NumberColumn(format="Rp %d")
-            }
-        )
-        
-        # Hapus data yang dipilih
-        hapus_index = st.multiselect("Pilih index data yang akan dihapus", options=range(len(st.session_state.data_lembur)), format_func=lambda x: f"{x+1}. {st.session_state.data_lembur[x]['tanggal']} - {st.session_state.data_lembur[x]['tipe']}")
-        if st.button("🗑️ Hapus Data Terpilih", type="secondary"):
-            for idx in sorted(hapus_index, reverse=True):
-                st.session_state.data_lembur.pop(idx)
-            st.success("Data berhasil dihapus!")
-            st.rerun()
-        
-        # Tombol Hitung Gaji
-        st.markdown("---")
-        if st.button("💰 HITUNG GAJI", type="primary"):
-            total_lembur = 0
-            log_detail = "============ LOG PERHITUNGAN ============\n"
-            
-            for d in st.session_state.data_lembur:
-                eff_jam = get_eff_jam(int(d['raw_jam']))
-                upah = calc_weekend(eff_jam, up_per_jam) if d['is_weekend'] else calc_weekday(eff_jam, up_per_jam)
-                total_lembur += upah
-                
-                log_detail += f"Tanggal: {d['tanggal']} [{d['tipe']}]\n"
-                log_detail += f"  Raw: {d['raw_jam']:.1f} jam -> Eff: {eff_jam} jam\n"
-                log_detail += f"  Upah: Rp {upah:,.0f}\n"
-                log_detail += "------------------------------------------\n"
-            
-            # Hitung BPJS
-            bpjs_kes = round(gaji_pokok * 0.01)
-            bpjs_jht = round(gaji_pokok * 0.02)
-            bpjs_jp = round(gaji_pokok * 0.01)
-            total_bpjs = bpjs_kes + bpjs_jht + bpjs_jp
-            netto = gaji_pokok + total_lembur - total_bpjs
-            
-            # Tampilkan hasil
-            col_a, col_b, col_c = st.columns(3)
-            with col_a:
-                st.metric("Gaji Pokok", f"Rp {gaji_pokok:,.0f}")
-            with col_b:
-                st.metric("Total Lembur", f"Rp {total_lembur:,.0f}")
-            with col_c:
-                st.metric("Total BPJS", f"Rp {total_bpjs:,.0f}")
-            
-            st.markdown("---")
-            st.success(f"### 💵 TOTAL GAJI BERSIH: Rp {netto:,.0f}")
-            
-            # Tampilkan log detail
-            with st.expander("📜 Lihat Detail Log Perhitungan"):
-                st.code(log_detail + f"\nTotal BPJS: Rp {total_bpjs:,.0f}\nTotal Bersih: Rp {netto:,.0f}")
-            
-            # Tombol Export CSV
-            csv_data = "Tanggal,Tipe,Raw Jam,Jam Efektif,Upah\n"
-            for d in st.session_state.data_lembur:
-                eff_jam = get_eff_jam(int(d['raw_jam']))
-                upah = calc_weekend(eff_jam, up_per_jam) if d['is_weekend'] else calc_weekday(eff_jam, up_per_jam)
-                csv_data += f"{d['tanggal']},{d['tipe']},{d['raw_jam']:.1f},{eff_jam},{upah}\n"
-            
-            st.download_button(
-                label="📥 Export CSV",
-                data=csv_data,
-                file_name=f"gaji_lembur_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv"
-            )
-    else:
-        st.info("Belum ada data lembur. Silakan tambah data di atas.")
-
 # --- HALAMAN LOGIN ---
 def show_login_page():
     st.title("🔒 Login Sistem Lembur")
@@ -548,7 +357,7 @@ def show_guest_view():
 def show_admin_view():
     with st.sidebar:
         st.title(f"👋 Halo, {st.session_state.username}")
-        menu = st.radio("Navigation", ["Create Surat", "Dashboard", "Data & Hapus", "Tools PDF", "Input Durasi Lembur", "Kalkulator Gapok + Lembur"])
+        menu = st.radio("Navigation", ["Create Surat", "Dashboard", "Data & Hapus", "Tools PDF", "Input Durasi Lembur"])
         if st.button("Logout"): st.session_state.logged_in = False; st.rerun()
 
     if menu == "Create Surat": show_form_content()
@@ -556,7 +365,6 @@ def show_admin_view():
     elif menu == "Data & Hapus": show_data_management()
     elif menu == "Tools PDF": show_pdf_tools()
     elif menu == "Input Durasi Lembur": show_overtime_calculator()
-    elif menu == "Kalkulator Gapok + Lembur": show_gaji_calculator()
 
 # --- SUB-MENU ADMIN: FORM (OTOMATIS + PUSH DOCX) ---
 def show_form_content():
@@ -745,13 +553,12 @@ def main():
         else:
             with st.sidebar:
                 st.title("Menu Guest")
-                guest_menu = st.radio("Navigation", ["Rekap Lembur", "Tools PDF", "Input Durasi Lembur", "Kalkulator Gapok + Lembur"])
+                guest_menu = st.radio("Navigation", ["Rekap Lembur", "Tools PDF", "Input Durasi Lembur"])
                 if st.button("Logout"): st.session_state.logged_in = False; st.rerun()
             
             if guest_menu == "Rekap Lembur": show_guest_view()
             elif guest_menu == "Tools PDF": show_pdf_tools()
             elif guest_menu == "Input Durasi Lembur": show_overtime_calculator()
-            elif guest_menu == "Kalkulator Gapok + Lembur": show_gaji_calculator()
 
 if __name__ == "__main__":
     main()
