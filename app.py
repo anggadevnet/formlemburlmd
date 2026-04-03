@@ -82,7 +82,7 @@ def init_db():
     if not os.path.exists(DB_FILE):
         df = pd.DataFrame(columns=[
             "Timestamp", "Nama", "NIK", "Bagian", "Lokasi", 
-            "Periode_Lembur", "Total_Jam", "Uraian", "Atasan", "FilePath"
+            "Periode_Lembur", "Total_Jam", "Total_Jam_Detail", "Uraian", "Atasan", "FilePath"
         ])
         df.to_csv(DB_FILE, index=False)
 
@@ -90,7 +90,7 @@ def save_to_db(data):
     if os.path.exists(DB_FILE):
         df = pd.read_csv(DB_FILE)
     else:
-        df = pd.DataFrame(columns=["Timestamp", "Nama", "NIK", "Bagian", "Lokasi", "Periode_Lembur", "Total_Jam", "Uraian", "Atasan", "FilePath"])
+        df = pd.DataFrame(columns=["Timestamp", "Nama", "NIK", "Bagian", "Lokasi", "Periode_Lembur", "Total_Jam", "Total_Jam_Detail", "Uraian", "Atasan", "FilePath"])
     
     new_df = pd.DataFrame([data])
     df = pd.concat([df, new_df], ignore_index=True)
@@ -127,9 +127,18 @@ def hitung_durasi(mulai_obj, selesai_obj):
     if delta.total_seconds() < 0: delta += timedelta(days=1)
     total_jam = int(delta.total_seconds() // 3600)
     total_menit = int((delta.total_seconds() % 3600) // 60)
-    teks_jam = f"{total_jam} jam"
-    if total_menit > 0: teks_jam += f" {total_menit} menit"
-    return f"{mulai_obj.strftime('%H:%M')} - {selesai_obj.strftime('%H:%M')} , {teks_jam}", total_jam
+    
+    # Format durasi teks dengan menampilkan jam dan menit
+    if total_jam > 0 and total_menit > 0:
+        teks_jam = f"{total_jam} jam {total_menit} menit"
+    elif total_jam > 0:
+        teks_jam = f"{total_jam} jam"
+    elif total_menit > 0:
+        teks_jam = f"{total_menit} menit"
+    else:
+        teks_jam = "0 jam"
+    
+    return f"{mulai_obj.strftime('%H:%M')} - {selesai_obj.strftime('%H:%M')} , {teks_jam}", total_jam, total_menit, teks_jam
 
 # --- FUNGSI TOOLS PDF ---
 def show_pdf_tools():
@@ -236,7 +245,14 @@ def show_overtime_calculator():
         
         def format_td(td):
             total_sec = td.total_seconds(); h = int(total_sec // 3600); m = int((total_sec % 3600) // 60)
-            return f"{h} Jam {m} Menit"
+            if h > 0 and m > 0:
+                return f"{h} Jam {m} Menit"
+            elif h > 0:
+                return f"{h} Jam"
+            elif m > 0:
+                return f"{m} Menit"
+            else:
+                return "0 Jam"
 
         if is_weekend:
             case_name = "CASE 4: Lembur di Hari Libur / Weekend"
@@ -315,15 +331,23 @@ def show_guest_view():
 
     st.markdown("---")
     if not df_show.empty:
-        total_jam = df_show['Total_Jam'].sum()
-        st.metric(f"Total Jam Lembur", f"{total_jam} Jam")
+        # Menampilkan total jam dengan detail
+        if 'Total_Jam_Detail' in df_show.columns:
+            total_display = df_show['Total_Jam_Detail'].iloc[0] if not df_show.empty else "0 jam"
+        else:
+            total_jam = df_show['Total_Jam'].sum()
+            total_display = f"{total_jam} jam"
+        
+        st.metric(f"Total Jam Lembur", total_display)
         st.markdown("---")
         for i, row in df_show.iterrows():
             with st.container():
                 col_info, col_btn = st.columns([3, 1])
                 with col_info:
+                    # Tampilkan detail durasi dengan menit jika ada
+                    durasi_tampil = row['Total_Jam_Detail'] if 'Total_Jam_Detail' in row and pd.notna(row['Total_Jam_Detail']) else f"{row['Total_Jam']} jam"
                     st.write(f"**{row['Nama']}** | {row['Periode_Lembur']}")
-                    st.caption(f"Durasi: {row['Total_Jam']} Jam | Lokasi: {row['Lokasi']}")
+                    st.caption(f"Durasi: {durasi_tampil} | Lokasi: {row['Lokasi']}")
                 with col_btn:
                     file_path = row['FilePath']
                     if os.path.exists(file_path):
@@ -382,7 +406,7 @@ def show_form_content():
             
             doc = DocxTemplate("template_surat.docx")
             tanggal_rapi = format_tanggal_range(tgl_mulai, tgl_selesai)
-            durasi_text, durasi_jam = hitung_durasi(jam_mulai, jam_selesai)
+            durasi_text, durasi_jam, durasi_menit, durasi_detail = hitung_durasi(jam_mulai, jam_selesai)
             
             context = {
                 'nama': pilih_nama, 'nik': detail['nik'], 'bagian': detail['bagian'], 'lokasi': lokasi,
@@ -408,12 +432,16 @@ def show_form_content():
             save_to_db({
                 "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Nama": pilih_nama, "NIK": detail['nik'],
                 "Bagian": detail['bagian'], "Lokasi": lokasi, "Periode_Lembur": tanggal_rapi, "Total_Jam": durasi_jam,
-                "Uraian": uraian, "Atasan": detail['atasan'], "FilePath": file_path
+                "Total_Jam_Detail": durasi_detail, "Uraian": uraian, "Atasan": detail['atasan'], "FilePath": file_path
             })
             
             buffer = io.BytesIO(); doc.save(buffer); buffer.seek(0)
             st.success("Data Tersimpan! 🎉")
             st.download_button("📥 Download", data=buffer, file_name=filename)
+            
+            # Tampilkan detail durasi yang tersimpan
+            st.info(f"✅ Durasi lembur: {durasi_detail}")
+            
         except Exception as e: st.error(f"Error: {e}")
 
 # --- SUB-MENU ADMIN: DASHBOARD (PER ORANG) ---
@@ -431,13 +459,20 @@ def show_dashboard():
     st.markdown("---")
     st.subheader("Rekap Per Karyawan")
     
-    rekap = df_filtered.groupby('Nama')['Total_Jam'].sum().reset_index()
+    # Buat rekap dengan detail
+    rekap = df_filtered.groupby('Nama').agg({
+        'Total_Jam': 'sum',
+        'Total_Jam_Detail': lambda x: ' + '.join(x.dropna().astype(str)) if len(x) > 0 else ''
+    }).reset_index()
 
     for i, row in rekap.iterrows():
         with st.container():
             col_nama, col_jam, col_aksi = st.columns([2, 1, 1])
             col_nama.write(f"**{row['Nama']}**")
-            col_jam.metric("Jam", f"{row['Total_Jam']}")
+            
+            # Tampilkan total jam dengan format yang benar
+            total_jam_int = int(row['Total_Jam']) if row['Total_Jam'] == int(row['Total_Jam']) else row['Total_Jam']
+            col_jam.metric("Total Jam", f"{total_jam_int} jam")
             
             files_person = df_filtered[df_filtered['Nama'] == row['Nama']]
             
@@ -445,16 +480,19 @@ def show_dashboard():
                 with st.expander("Detail"):
                     if not files_person.empty:
                         for x, data_row in files_person.iterrows():
-                            st.write(f"Tgl: {data_row['Periode_Lembur']} ({data_row['Total_Jam']} Jam)")
+                            durasi_tampil = data_row['Total_Jam_Detail'] if pd.notna(data_row.get('Total_Jam_Detail', '')) else f"{data_row['Total_Jam']} jam"
+                            st.write(f"📅 Tgl: {data_row['Periode_Lembur']}")
+                            st.write(f"⏱️ Durasi: {durasi_tampil}")
                             file_p = data_row['FilePath']
                             if os.path.exists(file_p):
                                 with open(file_p, "rb") as fp:
                                     st.download_button(
-                                        label="Download Surat", data=fp, file_name=os.path.basename(file_p),
+                                        label="📥 Download Surat", data=fp, file_name=os.path.basename(file_p),
                                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key=f"dash_dl_{x}"
                                     )
                             else:
-                                st.caption("File tidak ditemukan")
+                                st.caption("⚠️ File tidak ditemukan")
+                            st.markdown("---")
         st.markdown("---")
 
 # --- SUB-MENU ADMIN: DATA & HAPUS (FIXED) ---
@@ -463,8 +501,15 @@ def show_data_management():
     df = load_db()
     if df.empty: st.info("Tidak ada data."); return
     
+    # Tampilkan data dengan kolom detail durasi
     st.subheader("Data Lengkap")
-    st.dataframe(df, use_container_width=True)
+    df_display = df.copy()
+    if 'Total_Jam_Detail' in df_display.columns:
+        df_display['Durasi_Lengkap'] = df_display['Total_Jam_Detail']
+    else:
+        df_display['Durasi_Lengkap'] = df_display['Total_Jam'].astype(str) + " jam"
+    
+    st.dataframe(df_display[['Timestamp', 'Nama', 'Durasi_Lengkap', 'Periode_Lembur', 'Lokasi']], use_container_width=True)
     st.markdown("---")
     
     # --- Fitur Hapus ---
