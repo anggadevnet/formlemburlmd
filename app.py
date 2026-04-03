@@ -1,6 +1,6 @@
 import streamlit as st
 from docxtpl import DocxTemplate, RichText
-from datetime import datetime, timedelta, timezone, time, date
+from datetime import datetime, timedelta, timezone, date
 import io
 import pandas as pd
 import os
@@ -129,7 +129,7 @@ def hitung_durasi(mulai_obj, selesai_obj):
     total_menit = int((delta.total_seconds() % 3600) // 60)
     teks_jam = f"{total_jam} jam"
     if total_menit > 0: teks_jam += f" {total_menit} menit"
-    return f"{mulai_obj.strftime('%H:%M')} - {selesai_obj.strftime('%H:%M')} , {teks_jam}", total_jam
+    return f"{mulai_obj.strftime('%H:%M')} - {selesai_obj.strftime('%H:%M')} , {teks_jam}", total_jam + (total_menit / 60.0)  # <== PERUBAHAN: simpan dalam desimal biar menitnya gak ilang
 
 # --- FUNGSI TOOLS PDF ---
 def show_pdf_tools():
@@ -296,6 +296,8 @@ def show_guest_view():
         return
 
     df['Timestamp'] = pd.to_datetime(df['Timestamp'])
+    # PERUBAHAN: Konversi ke UTC+7 (Jakarta/Hanoi)
+    df['Timestamp'] = df['Timestamp'].dt.tz_localize('UTC').dt.tz_convert('Asia/Jakarta')
     df['Bulan'] = df['Timestamp'].dt.to_period('M').astype(str)
     list_bulan = df['Bulan'].unique()
     pilih_bulan = st.selectbox("Pilih Bulan", list_bulan)
@@ -315,15 +317,31 @@ def show_guest_view():
 
     st.markdown("---")
     if not df_show.empty:
+        # PERUBAHAN: Total jam bisa menampilkan desimal (misal 3.5 untuk 3 jam 30 menit)
         total_jam = df_show['Total_Jam'].sum()
-        st.metric(f"Total Jam Lembur", f"{total_jam} Jam")
+        # Format biar rapih: kalo ada desimal .5 -> jadi "X jam 30 menit"
+        jam_bulat = int(total_jam)
+        menit_bulat = int((total_jam - jam_bulat) * 60)
+        if menit_bulat > 0:
+            total_jam_text = f"{jam_bulat} Jam {menit_bulat} Menit"
+        else:
+            total_jam_text = f"{jam_bulat} Jam"
+        st.metric(f"Total Jam Lembur", total_jam_text)
         st.markdown("---")
         for i, row in df_show.iterrows():
             with st.container():
                 col_info, col_btn = st.columns([3, 1])
                 with col_info:
+                    # PERUBAHAN: Display durasi dengan menit
+                    jam_val = row['Total_Jam']
+                    jam_int = int(jam_val)
+                    menit_int = int((jam_val - jam_int) * 60)
+                    if menit_int > 0:
+                        durasi_text = f"{jam_int} Jam {menit_int} Menit"
+                    else:
+                        durasi_text = f"{jam_int} Jam"
                     st.write(f"**{row['Nama']}** | {row['Periode_Lembur']}")
-                    st.caption(f"Durasi: {row['Total_Jam']} Jam | Lokasi: {row['Lokasi']}")
+                    st.caption(f"Durasi: {durasi_text} | Lokasi: {row['Lokasi']}")
                 with col_btn:
                     file_path = row['FilePath']
                     if os.path.exists(file_path):
@@ -404,9 +422,11 @@ def show_form_content():
             else:
                 st.toast("⚠️ File hanya tersimpan lokal (Gagal sync ke GitHub).", icon="⚠️")
 
-            # Save Database
+            # PERUBAHAN: Timestamp pakai UTC+7 (Jakarta/Hanoi)
+            now_jakarta = datetime.now(timezone(timedelta(hours=7)))
+            
             save_to_db({
-                "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Nama": pilih_nama, "NIK": detail['nik'],
+                "Timestamp": now_jakarta.strftime("%Y-%m-%d %H:%M:%S"), "Nama": pilih_nama, "NIK": detail['nik'],
                 "Bagian": detail['bagian'], "Lokasi": lokasi, "Periode_Lembur": tanggal_rapi, "Total_Jam": durasi_jam,
                 "Uraian": uraian, "Atasan": detail['atasan'], "FilePath": file_path
             })
@@ -423,6 +443,8 @@ def show_dashboard():
     if df.empty: st.warning("Data masih kosong."); return
 
     df['Timestamp'] = pd.to_datetime(df['Timestamp'])
+    # PERUBAHAN: Konversi ke UTC+7
+    df['Timestamp'] = df['Timestamp'].dt.tz_localize('UTC').dt.tz_convert('Asia/Jakarta')
     df['Bulan'] = df['Timestamp'].dt.to_period('M').astype(str)
     
     pilih_bulan = st.selectbox("Pilih Bulan", df['Bulan'].unique())
@@ -437,7 +459,15 @@ def show_dashboard():
         with st.container():
             col_nama, col_jam, col_aksi = st.columns([2, 1, 1])
             col_nama.write(f"**{row['Nama']}**")
-            col_jam.metric("Jam", f"{row['Total_Jam']}")
+            # PERUBAHAN: Display jam dengan menit
+            jam_val = row['Total_Jam']
+            jam_int = int(jam_val)
+            menit_int = int((jam_val - jam_int) * 60)
+            if menit_int > 0:
+                jam_text = f"{jam_int} Jam {menit_int} Menit"
+            else:
+                jam_text = f"{jam_int} Jam"
+            col_jam.metric("Jam", jam_text)
             
             files_person = df_filtered[df_filtered['Nama'] == row['Nama']]
             
@@ -445,7 +475,15 @@ def show_dashboard():
                 with st.expander("Detail"):
                     if not files_person.empty:
                         for x, data_row in files_person.iterrows():
-                            st.write(f"Tgl: {data_row['Periode_Lembur']} ({data_row['Total_Jam']} Jam)")
+                            # PERUBAHAN: Display durasi per item dengan menit
+                            jam_item = data_row['Total_Jam']
+                            jam_i = int(jam_item)
+                            menit_i = int((jam_item - jam_i) * 60)
+                            if menit_i > 0:
+                                dur_item = f"{jam_i} Jam {menit_i} Menit"
+                            else:
+                                dur_item = f"{jam_i} Jam"
+                            st.write(f"Tgl: {data_row['Periode_Lembur']} ({dur_item})")
                             file_p = data_row['FilePath']
                             if os.path.exists(file_p):
                                 with open(file_p, "rb") as fp:
@@ -463,8 +501,13 @@ def show_data_management():
     df = load_db()
     if df.empty: st.info("Tidak ada data."); return
     
+    # PERUBAHAN: Tampilkan timestamp dalam UTC+7
+    df_display = df.copy()
+    df_display['Timestamp'] = pd.to_datetime(df_display['Timestamp'])
+    df_display['Timestamp'] = df_display['Timestamp'].dt.tz_localize('UTC').dt.tz_convert('Asia/Jakarta')
+    
     st.subheader("Data Lengkap")
-    st.dataframe(df, use_container_width=True)
+    st.dataframe(df_display, use_container_width=True)
     st.markdown("---")
     
     # --- Fitur Hapus ---
@@ -519,4 +562,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
