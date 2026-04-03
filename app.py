@@ -8,6 +8,7 @@ import tempfile
 import zipfile
 import subprocess
 import shutil
+import re
 
 # --- IMPORT PDF (VERSI AMAN) ---
 try:
@@ -82,15 +83,23 @@ def init_db():
     if not os.path.exists(DB_FILE):
         df = pd.DataFrame(columns=[
             "Timestamp", "Nama", "NIK", "Bagian", "Lokasi", 
-            "Periode_Lembur", "Total_Jam", "Uraian", "Atasan", "FilePath"
+            "Periode_Lembur", "Total_Jam", "Total_Menit", "Total_Jam_Detail", "Uraian", "Atasan", "FilePath"
         ])
+        df.to_csv(DB_FILE, index=False)
+    else:
+        # Migrasi database lama jika perlu
+        df = pd.read_csv(DB_FILE)
+        if 'Total_Menit' not in df.columns:
+            df['Total_Menit'] = 0
+        if 'Total_Jam_Detail' not in df.columns:
+            df['Total_Jam_Detail'] = df['Total_Jam'].astype(str) + ' jam'
         df.to_csv(DB_FILE, index=False)
 
 def save_to_db(data):
     if os.path.exists(DB_FILE):
         df = pd.read_csv(DB_FILE)
     else:
-        df = pd.DataFrame(columns=["Timestamp", "Nama", "NIK", "Bagian", "Lokasi", "Periode_Lembur", "Total_Jam", "Uraian", "Atasan", "FilePath"])
+        df = pd.DataFrame(columns=["Timestamp", "Nama", "NIK", "Bagian", "Lokasi", "Periode_Lembur", "Total_Jam", "Total_Menit", "Total_Jam_Detail", "Uraian", "Atasan", "FilePath"])
     
     new_df = pd.DataFrame([data])
     df = pd.concat([df, new_df], ignore_index=True)
@@ -103,7 +112,13 @@ def load_db():
     if not os.path.exists(DB_FILE):
         return pd.DataFrame()
     try:
-        return pd.read_csv(DB_FILE)
+        df = pd.read_csv(DB_FILE)
+        # Pastikan kolom yang diperlukan ada
+        if 'Total_Menit' not in df.columns:
+            df['Total_Menit'] = 0
+        if 'Total_Jam_Detail' not in df.columns:
+            df['Total_Jam_Detail'] = df['Total_Jam'].astype(str) + ' jam'
+        return df
     except:
         return pd.DataFrame()
 
@@ -127,9 +142,18 @@ def hitung_durasi(mulai_obj, selesai_obj):
     if delta.total_seconds() < 0: delta += timedelta(days=1)
     total_jam = int(delta.total_seconds() // 3600)
     total_menit = int((delta.total_seconds() % 3600) // 60)
-    teks_jam = f"{total_jam} jam"
-    if total_menit > 0: teks_jam += f" {total_menit} menit"
-    return f"{mulai_obj.strftime('%H:%M')} - {selesai_obj.strftime('%H:%M')} , {teks_jam}", total_jam
+    
+    # Format teks yang benar dengan jam dan menit
+    if total_jam > 0 and total_menit > 0:
+        teks_jam = f"{total_jam} jam {total_menit} menit"
+    elif total_jam > 0:
+        teks_jam = f"{total_jam} jam"
+    elif total_menit > 0:
+        teks_jam = f"{total_menit} menit"
+    else:
+        teks_jam = "0 jam"
+    
+    return f"{mulai_obj.strftime('%H:%M')} - {selesai_obj.strftime('%H:%M')} , {teks_jam}", total_jam, total_menit, teks_jam
 
 # --- FUNGSI TOOLS PDF ---
 def show_pdf_tools():
@@ -205,7 +229,7 @@ def show_pdf_tools():
 
 # --- FITUR KALKULATOR LEMBUR (LENGKAP) ---
 def show_overtime_calculator():
-    st.title("⏱️ Kalkulator Durasi Lembur")
+    st.title("⏱️ Input TALENTA Durasi Lembur")
     st.markdown("---")
     st.markdown("Isi data dibawah ini untuk menghitung durasi lembur otomatis.")
     
@@ -236,7 +260,14 @@ def show_overtime_calculator():
         
         def format_td(td):
             total_sec = td.total_seconds(); h = int(total_sec // 3600); m = int((total_sec % 3600) // 60)
-            return f"{h} Jam {m} Menit"
+            if h > 0 and m > 0:
+                return f"{h} Jam {m} Menit"
+            elif h > 0:
+                return f"{h} Jam"
+            elif m > 0:
+                return f"{m} Menit"
+            else:
+                return "0 Jam"
 
         if is_weekend:
             case_name = "CASE 4: Lembur di Hari Libur / Weekend"
@@ -315,15 +346,33 @@ def show_guest_view():
 
     st.markdown("---")
     if not df_show.empty:
+        # Hitung total jam dan menit
         total_jam = df_show['Total_Jam'].sum()
-        st.metric(f"Total Jam Lembur", f"{total_jam} Jam")
+        total_menit = df_show['Total_Menit'].sum()
+        
+        # Normalisasi menit ke jam
+        total_jam += total_menit // 60
+        sisa_menit = total_menit % 60
+        
+        if total_jam > 0 and sisa_menit > 0:
+            total_display = f"{int(total_jam)} jam {sisa_menit} menit"
+        elif total_jam > 0:
+            total_display = f"{int(total_jam)} jam"
+        elif sisa_menit > 0:
+            total_display = f"{sisa_menit} menit"
+        else:
+            total_display = "0 jam"
+        
+        st.metric(f"Total Jam Lembur", total_display)
         st.markdown("---")
         for i, row in df_show.iterrows():
             with st.container():
                 col_info, col_btn = st.columns([3, 1])
                 with col_info:
                     st.write(f"**{row['Nama']}** | {row['Periode_Lembur']}")
-                    st.caption(f"Durasi: {row['Total_Jam']} Jam | Lokasi: {row['Lokasi']}")
+                    # Tampilkan detail durasi
+                    durasi_tampil = row['Total_Jam_Detail'] if pd.notna(row.get('Total_Jam_Detail', '')) else f"{int(row['Total_Jam'])} jam"
+                    st.caption(f"Durasi: {durasi_tampil} | Lokasi: {row['Lokasi']}")
                 with col_btn:
                     file_path = row['FilePath']
                     if os.path.exists(file_path):
@@ -339,14 +388,14 @@ def show_guest_view():
 def show_admin_view():
     with st.sidebar:
         st.title(f"👋 Halo, {st.session_state.username}")
-        menu = st.radio("Navigation", ["Create Surat", "Dashboard", "Data & Hapus", "Tools PDF", "Kalkulator Lembur"])
+        menu = st.radio("Navigation", ["Create Surat", "Dashboard", "Data & Hapus", "Tools PDF", "Input Lembur TALENTA"])
         if st.button("Logout"): st.session_state.logged_in = False; st.rerun()
 
     if menu == "Create Surat": show_form_content()
     elif menu == "Dashboard": show_dashboard()
     elif menu == "Data & Hapus": show_data_management()
     elif menu == "Tools PDF": show_pdf_tools()
-    elif menu == "Kalkulator Lembur": show_overtime_calculator()
+    elif menu == "Input Lembur Talenta": show_overtime_calculator()
 
 # --- SUB-MENU ADMIN: FORM (OTOMATIS + PUSH DOCX) ---
 def show_form_content():
@@ -382,7 +431,7 @@ def show_form_content():
             
             doc = DocxTemplate("template_surat.docx")
             tanggal_rapi = format_tanggal_range(tgl_mulai, tgl_selesai)
-            durasi_text, durasi_jam = hitung_durasi(jam_mulai, jam_selesai)
+            durasi_text, durasi_jam, durasi_menit, durasi_detail = hitung_durasi(jam_mulai, jam_selesai)
             
             context = {
                 'nama': pilih_nama, 'nik': detail['nik'], 'bagian': detail['bagian'], 'lokasi': lokasi,
@@ -404,15 +453,24 @@ def show_form_content():
             else:
                 st.toast("⚠️ File hanya tersimpan lokal (Gagal sync ke GitHub).", icon="⚠️")
 
-            # Save Database
+            # Save Database dengan detail jam dan menit
             save_to_db({
-                "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Nama": pilih_nama, "NIK": detail['nik'],
-                "Bagian": detail['bagian'], "Lokasi": lokasi, "Periode_Lembur": tanggal_rapi, "Total_Jam": durasi_jam,
-                "Uraian": uraian, "Atasan": detail['atasan'], "FilePath": file_path
+                "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
+                "Nama": pilih_nama, 
+                "NIK": detail['nik'],
+                "Bagian": detail['bagian'], 
+                "Lokasi": lokasi, 
+                "Periode_Lembur": tanggal_rapi, 
+                "Total_Jam": durasi_jam,
+                "Total_Menit": durasi_menit,
+                "Total_Jam_Detail": durasi_detail,
+                "Uraian": uraian, 
+                "Atasan": detail['atasan'], 
+                "FilePath": file_path
             })
             
             buffer = io.BytesIO(); doc.save(buffer); buffer.seek(0)
-            st.success("Data Tersimpan! 🎉")
+            st.success(f"Data Tersimpan! 🎉 (Durasi: {durasi_detail})")
             st.download_button("📥 Download", data=buffer, file_name=filename)
         except Exception as e: st.error(f"Error: {e}")
 
@@ -431,30 +489,51 @@ def show_dashboard():
     st.markdown("---")
     st.subheader("Rekap Per Karyawan")
     
-    rekap = df_filtered.groupby('Nama')['Total_Jam'].sum().reset_index()
-
-    for i, row in rekap.iterrows():
+    # Ambil data unique per karyawan
+    karyawan_list = df_filtered['Nama'].unique()
+    
+    for nama in karyawan_list:
+        df_karyawan = df_filtered[df_filtered['Nama'] == nama]
+        
+        # Hitung total jam dan menit
+        total_jam = df_karyawan['Total_Jam'].sum()
+        total_menit = df_karyawan['Total_Menit'].sum()
+        
+        # Normalisasi
+        total_jam += total_menit // 60
+        sisa_menit = total_menit % 60
+        
+        # Format total
+        if total_jam > 0 and sisa_menit > 0:
+            total_durasi_tampil = f"{int(total_jam)} jam {sisa_menit} menit"
+        elif total_jam > 0:
+            total_durasi_tampil = f"{int(total_jam)} jam"
+        elif sisa_menit > 0:
+            total_durasi_tampil = f"{sisa_menit} menit"
+        else:
+            total_durasi_tampil = "0 jam"
+        
         with st.container():
             col_nama, col_jam, col_aksi = st.columns([2, 1, 1])
-            col_nama.write(f"**{row['Nama']}**")
-            col_jam.metric("Jam", f"{row['Total_Jam']}")
-            
-            files_person = df_filtered[df_filtered['Nama'] == row['Nama']]
+            col_nama.write(f"**{nama}**")
+            col_jam.metric("Total Jam", total_durasi_tampil)
             
             with col_aksi:
                 with st.expander("Detail"):
-                    if not files_person.empty:
-                        for x, data_row in files_person.iterrows():
-                            st.write(f"Tgl: {data_row['Periode_Lembur']} ({data_row['Total_Jam']} Jam)")
-                            file_p = data_row['FilePath']
-                            if os.path.exists(file_p):
-                                with open(file_p, "rb") as fp:
-                                    st.download_button(
-                                        label="Download Surat", data=fp, file_name=os.path.basename(file_p),
-                                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key=f"dash_dl_{x}"
-                                    )
-                            else:
-                                st.caption("File tidak ditemukan")
+                    for x, data_row in df_karyawan.iterrows():
+                        durasi_tampil = data_row['Total_Jam_Detail'] if pd.notna(data_row.get('Total_Jam_Detail', '')) else f"{int(data_row['Total_Jam'])} jam"
+                        st.write(f"📅 Tgl: {data_row['Periode_Lembur']}")
+                        st.write(f"⏱️ Durasi: {durasi_tampil}")
+                        file_p = data_row['FilePath']
+                        if os.path.exists(file_p):
+                            with open(file_p, "rb") as fp:
+                                st.download_button(
+                                    label="📥 Download Surat", data=fp, file_name=os.path.basename(file_p),
+                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key=f"dash_dl_{x}"
+                                )
+                        else:
+                            st.caption("⚠️ File tidak ditemukan")
+                        st.markdown("---")
         st.markdown("---")
 
 # --- SUB-MENU ADMIN: DATA & HAPUS (FIXED) ---
@@ -463,8 +542,14 @@ def show_data_management():
     df = load_db()
     if df.empty: st.info("Tidak ada data."); return
     
+    # Tampilkan data dengan durasi lengkap
     st.subheader("Data Lengkap")
-    st.dataframe(df, use_container_width=True)
+    df_display = df.copy()
+    if 'Total_Jam_Detail' in df_display.columns:
+        df_display['Durasi'] = df_display['Total_Jam_Detail']
+    else:
+        df_display['Durasi'] = df_display['Total_Jam'].astype(str) + ' jam'
+    st.dataframe(df_display[['Timestamp', 'Nama', 'Durasi', 'Periode_Lembur', 'Lokasi']], use_container_width=True)
     st.markdown("---")
     
     # --- Fitur Hapus ---
@@ -510,13 +595,12 @@ def main():
         else:
             with st.sidebar:
                 st.title("Menu Guest")
-                guest_menu = st.radio("Navigation", ["Rekap Lembur", "Tools PDF", "Kalkulator Lembur"])
+                guest_menu = st.radio("Navigation", ["Rekap Lembur", "Tools PDF", "Input Lembur Talenta"])
                 if st.button("Logout"): st.session_state.logged_in = False; st.rerun()
             
             if guest_menu == "Rekap Lembur": show_guest_view()
             elif guest_menu == "Tools PDF": show_pdf_tools()
-            elif guest_menu == "Kalkulator Lembur": show_overtime_calculator()
+            elif guest_menu == "Input Lembur Talenta": show_overtime_calculator()
 
 if __name__ == "__main__":
     main()
-
