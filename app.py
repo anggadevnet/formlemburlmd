@@ -236,14 +236,7 @@ def show_overtime_calculator():
         
         def format_td(td):
             total_sec = td.total_seconds(); h = int(total_sec // 3600); m = int((total_sec % 3600) // 60)
-            if h > 0 and m > 0:
-                return f"{h} Jam {m} Menit"
-            elif h > 0:
-                return f"{h} Jam"
-            elif m > 0:
-                return f"{m} Menit"
-            else:
-                return "0 Jam"
+            return f"{h} Jam {m} Menit"
 
         if is_weekend:
             case_name = "CASE 4: Lembur di Hari Libur / Weekend"
@@ -330,7 +323,6 @@ def show_guest_view():
                 col_info, col_btn = st.columns([3, 1])
                 with col_info:
                     st.write(f"**{row['Nama']}** | {row['Periode_Lembur']}")
-                    # TAMPILAN DIPERBAIKI: menampilkan jam saja (karena database hanya simpan jam integer)
                     st.caption(f"Durasi: {row['Total_Jam']} Jam | Lokasi: {row['Lokasi']}")
                 with col_btn:
                     file_path = row['FilePath']
@@ -445,7 +437,6 @@ def show_dashboard():
         with st.container():
             col_nama, col_jam, col_aksi = st.columns([2, 1, 1])
             col_nama.write(f"**{row['Nama']}**")
-            # TAMPILAN DIPERBAIKI: menampilkan jam saja
             col_jam.metric("Jam", f"{row['Total_Jam']}")
             
             files_person = df_filtered[df_filtered['Nama'] == row['Nama']]
@@ -454,7 +445,6 @@ def show_dashboard():
                 with st.expander("Detail"):
                     if not files_person.empty:
                         for x, data_row in files_person.iterrows():
-                            # TAMPILAN DIPERBAIKI: menampilkan jam saja
                             st.write(f"Tgl: {data_row['Periode_Lembur']} ({data_row['Total_Jam']} Jam)")
                             file_p = data_row['FilePath']
                             if os.path.exists(file_p):
@@ -529,3 +519,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
