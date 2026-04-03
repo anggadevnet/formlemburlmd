@@ -129,7 +129,182 @@ def hitung_durasi(mulai_obj, selesai_obj):
     total_menit = int((delta.total_seconds() % 3600) // 60)
     teks_jam = f"{total_jam} jam"
     if total_menit > 0: teks_jam += f" {total_menit} menit"
-    return f"{mulai_obj.strftime('%H:%M')} - {selesai_obj.strftime('%H:%M')} , {teks_jam}", total_jam + (total_menit / 60.0)  # <== PERUBAHAN: simpan dalam desimal biar menitnya gak ilang
+    return f"{mulai_obj.strftime('%H:%M')} - {selesai_obj.strftime('%H:%M')} , {teks_jam}", total_jam + (total_menit / 60.0)
+
+# --- FUNGSI KALKULATOR TALENTA LMD (BARU) ---
+def show_talenta_calculator():
+    st.title("⏱️ Kalkulator TALENTA LMD")
+    st.markdown("---")
+    st.markdown("Hitung durasi lembur berdasarkan logika TALENTA LMD")
+    
+    # Inisialisasi session state untuk history
+    if 'talenta_history' not in st.session_state:
+        st.session_state.talenta_history = []
+    
+    # Form input
+    with st.form("talenta_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+            tgl_lembur = st.date_input("Tanggal Lembur", value=date.today())
+        with col2:
+            is_weekend = st.checkbox("Weekend / Holiday (CASE 4)")
+        
+        st.markdown("#### 🕒 Jadwal Shift (System)")
+        col3, col4 = st.columns(2)
+        with col3:
+            sched_in = st.time_input("Mulai Shift (System)", value=datetime.strptime("08:30", "%H:%M").time(), disabled=is_weekend)
+        with col4:
+            sched_out = st.time_input("Pulang Shift (System)", value=datetime.strptime("17:30", "%H:%M").time(), disabled=is_weekend)
+        
+        st.markdown("#### ⚡ Jadwal Lembur Aktual")
+        col5, col6 = st.columns(2)
+        with col5:
+            ot_in = st.time_input("Mulai Lembur", value=datetime.strptime("17:30", "%H:%M").time())
+        with col6:
+            ot_out = st.time_input("Selesai Lembur", value=datetime.strptime("20:00", "%H:%M").time())
+        
+        submitted = st.form_submit_button("Hitung Durasi", type="primary")
+    
+    if submitted:
+        # Logic perhitungan
+        dt_sched_in = datetime.combine(tgl_lembur, sched_in)
+        dt_sched_out = datetime.combine(tgl_lembur, sched_out)
+        dt_ot_in = datetime.combine(tgl_lembur, ot_in)
+        dt_ot_out = datetime.combine(tgl_lembur, ot_out)
+        
+        if dt_sched_out <= dt_sched_in:
+            dt_sched_out += timedelta(days=1)
+        if dt_ot_out <= dt_ot_in:
+            dt_ot_out += timedelta(days=1)
+        
+        def to_hour_min(total_minutes):
+            h = int(total_minutes // 60)
+            m = int(total_minutes % 60)
+            return h, m
+        
+        dur_before_h = dur_before_m = 0
+        dur_after_h = dur_after_m = 0
+        break_before_h = break_before_m = 0
+        break_after_h = break_after_m = 0
+        case_name = ""
+        
+        if is_weekend:
+            case_name = "CASE 4: Lembur di Hari Libur / Weekend"
+            diff_minutes = (dt_ot_out - dt_ot_in).total_seconds() / 60
+            total_h, total_m = to_hour_min(diff_minutes)
+            dur_after_h, dur_after_m = total_h, total_m
+        else:
+            if dt_ot_in < dt_sched_out:
+                case_name = f"CASE 1: Lembur Setelah Jam Kerja (Dimulai Sebelum {sched_out.strftime('%H:%M')})"
+                diff_before = (dt_sched_out - dt_ot_in).total_seconds() / 60
+                if diff_before > 0:
+                    dur_before_h, dur_before_m = to_hour_min(diff_before)
+                if dt_ot_out > dt_sched_out:
+                    diff_after = (dt_ot_out - dt_sched_out).total_seconds() / 60
+                    if diff_after > 0:
+                        dur_after_h, dur_after_m = to_hour_min(diff_after)
+            elif dt_ot_in >= dt_sched_out:
+                if ot_out < sched_in:
+                    case_name = "CASE 3: Lembur Sebelum Jam Kerja (Overnight)"
+                else:
+                    case_name = f"CASE 2: Lembur Setelah Jam Kerja (Dimulai Setelah {sched_out.strftime('%H:%M')})"
+                diff_after = (dt_ot_out - dt_sched_out).total_seconds() / 60
+                dur_after_h, dur_after_m = to_hour_min(diff_after)
+                diff_break = (dt_ot_in - dt_sched_out).total_seconds() / 60
+                if diff_break > 0:
+                    break_after_h, break_after_m = to_hour_min(diff_break)
+        
+        # Hitung total
+        total_minutes = (dur_before_h * 60 + dur_before_m) + (dur_after_h * 60 + dur_after_m)
+        total_deduct = (break_before_h * 60 + break_before_m) + (break_after_h * 60 + break_after_m)
+        final_total = max(0, total_minutes - total_deduct)
+        total_h, total_m = to_hour_min(final_total)
+        
+        # Simpan ke history (tanpa push ke GitHub)
+        history_entry = {
+            "Tanggal": tgl_lembur.strftime("%Y-%m-%d"),
+            "Hari": "Weekend" if is_weekend else "Weekday",
+            "Mulai Shift": sched_in.strftime("%H:%M"),
+            "Selesai Shift": sched_out.strftime("%H:%M"),
+            "Mulai Lembur": ot_in.strftime("%H:%M"),
+            "Selesai Lembur": ot_out.strftime("%H:%M"),
+            "Durasi Before (Jam)": dur_before_h,
+            "Durasi Before (Menit)": dur_before_m,
+            "Durasi After (Jam)": dur_after_h,
+            "Durasi After (Menit)": dur_after_m,
+            "Break Before (Jam)": break_before_h,
+            "Break Before (Menit)": break_before_m,
+            "Break After (Jam)": break_after_h,
+            "Break After (Menit)": break_after_m,
+            "Total Jam": total_h,
+            "Total Menit": total_m,
+            "Total (Format)": f"{total_h} Jam {total_m} Menit" if total_m > 0 else f"{total_h} Jam",
+            "Case": case_name
+        }
+        st.session_state.talenta_history.insert(0, history_entry)  # Tambah di awal
+        
+        # Tampilkan hasil
+        st.markdown("---")
+        st.subheader("📊 Hasil Perhitungan")
+        
+        col_res1, col_res2 = st.columns(2)
+        with col_res1:
+            if not is_weekend:
+                st.metric("Durasi Before", f"{dur_before_h} Jam {dur_before_m} Menit" if dur_before_m > 0 else f"{dur_before_h} Jam")
+                st.metric("Break Before", f"{break_before_h} Jam {break_before_m} Menit" if break_before_m > 0 else f"{break_before_h} Jam")
+        with col_res2:
+            st.metric("Durasi After", f"{dur_after_h} Jam {dur_after_m} Menit" if dur_after_m > 0 else f"{dur_after_h} Jam")
+            if not is_weekend:
+                st.metric("Break After", f"{break_after_h} Jam {break_after_m} Menit" if break_after_m > 0 else f"{break_after_h} Jam")
+        
+        st.markdown("---")
+        st.success(f"**TOTAL LEMBUR: {total_h} Jam {total_m} Menit**" if total_m > 0 else f"**TOTAL LEMBUR: {total_h} Jam**")
+        st.caption(f"Kategori: {case_name}")
+    
+    # Tampilkan History & Export
+    if st.session_state.talenta_history:
+        st.markdown("---")
+        st.subheader("📜 Riwayat Perhitungan")
+        
+        # Konversi history ke DataFrame untuk tampilan
+        df_history = pd.DataFrame(st.session_state.talenta_history)
+        
+        # Tampilkan tabel ringkas
+        st.dataframe(
+            df_history[["Tanggal", "Hari", "Mulai Lembur", "Selesai Lembur", "Total (Format)", "Case"]],
+            use_container_width=True,
+            hide_index=True
+        )
+        
+        # Fitur Export
+        col_exp1, col_exp2 = st.columns(2)
+        with col_exp1:
+            # Export ke CSV
+            csv_buffer = io.StringIO()
+            df_history.to_csv(csv_buffer, index=False)
+            st.download_button(
+                label="📥 Export ke CSV",
+                data=csv_buffer.getvalue(),
+                file_name=f"talenta_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv"
+            )
+        with col_exp2:
+            # Export ke Excel
+            excel_buffer = io.BytesIO()
+            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                df_history.to_excel(writer, sheet_name="Talenta LMD", index=False)
+            excel_buffer.seek(0)
+            st.download_button(
+                label="📊 Export ke Excel",
+                data=excel_buffer,
+                file_name=f"talenta_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        
+        # Tombol Clear History
+        if st.button("🗑️ Clear History", type="secondary"):
+            st.session_state.talenta_history = []
+            st.rerun()
 
 # --- FUNGSI TOOLS PDF ---
 def show_pdf_tools():
@@ -296,20 +471,16 @@ def show_guest_view():
         return
 
     df['Timestamp'] = pd.to_datetime(df['Timestamp'])
-    # PERUBAHAN: Konversi ke UTC+7 (Jakarta/Hanoi)
     df['Timestamp'] = df['Timestamp'].dt.tz_localize('UTC').dt.tz_convert('Asia/Jakarta')
     df['Bulan'] = df['Timestamp'].dt.to_period('M').astype(str)
     list_bulan = df['Bulan'].unique()
     pilih_bulan = st.selectbox("Pilih Bulan", list_bulan)
     
-    # Filter bulan
     df_filtered_month = df[df['Bulan'] == pilih_bulan]
     
-    # --- FITUR BARU: FILTER KARYAWAN ---
     list_nama = df_filtered_month['Nama'].unique()
     pilih_nama = st.selectbox("Pilih Karyawan", ["Semua"] + list(list_nama))
 
-    # Terapkan filter
     if pilih_nama == "Semua": 
         df_show = df_filtered_month
     else: 
@@ -317,9 +488,7 @@ def show_guest_view():
 
     st.markdown("---")
     if not df_show.empty:
-        # PERUBAHAN: Total jam bisa menampilkan desimal (misal 3.5 untuk 3 jam 30 menit)
         total_jam = df_show['Total_Jam'].sum()
-        # Format biar rapih: kalo ada desimal .5 -> jadi "X jam 30 menit"
         jam_bulat = int(total_jam)
         menit_bulat = int((total_jam - jam_bulat) * 60)
         if menit_bulat > 0:
@@ -332,7 +501,6 @@ def show_guest_view():
             with st.container():
                 col_info, col_btn = st.columns([3, 1])
                 with col_info:
-                    # PERUBAHAN: Display durasi dengan menit
                     jam_val = row['Total_Jam']
                     jam_int = int(jam_val)
                     menit_int = int((jam_val - jam_int) * 60)
@@ -357,7 +525,7 @@ def show_guest_view():
 def show_admin_view():
     with st.sidebar:
         st.title(f"👋 Halo, {st.session_state.username}")
-        menu = st.radio("Navigation", ["Create Surat", "Dashboard", "Data & Hapus", "Tools PDF", "Input Durasi Lembur"])
+        menu = st.radio("Navigation", ["Create Surat", "Dashboard", "Data & Hapus", "Tools PDF", "Input Durasi Lembur", "Kalkulator TALENTA LMD"])
         if st.button("Logout"): st.session_state.logged_in = False; st.rerun()
 
     if menu == "Create Surat": show_form_content()
@@ -365,6 +533,7 @@ def show_admin_view():
     elif menu == "Data & Hapus": show_data_management()
     elif menu == "Tools PDF": show_pdf_tools()
     elif menu == "Input Durasi Lembur": show_overtime_calculator()
+    elif menu == "Kalkulator TALENTA LMD": show_talenta_calculator()
 
 # --- SUB-MENU ADMIN: FORM (OTOMATIS + PUSH DOCX) ---
 def show_form_content():
@@ -413,7 +582,6 @@ def show_form_content():
             file_path = os.path.join(DOCS_FOLDER, filename)
             doc.save(file_path)
             
-            # --- AUTO PUSH FILE DOCX KE GITHUB ---
             repo_file_path = f"{DOCS_FOLDER}/{filename}"
             push_success = push_to_github(file_path, repo_file_path, f"Add Surat: {pilih_nama}")
             
@@ -422,7 +590,6 @@ def show_form_content():
             else:
                 st.toast("⚠️ File hanya tersimpan lokal (Gagal sync ke GitHub).", icon="⚠️")
 
-            # PERUBAHAN: Timestamp pakai UTC+7 (Jakarta/Hanoi)
             now_jakarta = datetime.now(timezone(timedelta(hours=7)))
             
             save_to_db({
@@ -443,7 +610,6 @@ def show_dashboard():
     if df.empty: st.warning("Data masih kosong."); return
 
     df['Timestamp'] = pd.to_datetime(df['Timestamp'])
-    # PERUBAHAN: Konversi ke UTC+7
     df['Timestamp'] = df['Timestamp'].dt.tz_localize('UTC').dt.tz_convert('Asia/Jakarta')
     df['Bulan'] = df['Timestamp'].dt.to_period('M').astype(str)
     
@@ -459,7 +625,6 @@ def show_dashboard():
         with st.container():
             col_nama, col_jam, col_aksi = st.columns([2, 1, 1])
             col_nama.write(f"**{row['Nama']}**")
-            # PERUBAHAN: Display jam dengan menit
             jam_val = row['Total_Jam']
             jam_int = int(jam_val)
             menit_int = int((jam_val - jam_int) * 60)
@@ -475,7 +640,6 @@ def show_dashboard():
                 with st.expander("Detail"):
                     if not files_person.empty:
                         for x, data_row in files_person.iterrows():
-                            # PERUBAHAN: Display durasi per item dengan menit
                             jam_item = data_row['Total_Jam']
                             jam_i = int(jam_item)
                             menit_i = int((jam_item - jam_i) * 60)
@@ -501,7 +665,6 @@ def show_data_management():
     df = load_db()
     if df.empty: st.info("Tidak ada data."); return
     
-    # PERUBAHAN: Tampilkan timestamp dalam UTC+7
     df_display = df.copy()
     df_display['Timestamp'] = pd.to_datetime(df_display['Timestamp'])
     df_display['Timestamp'] = df_display['Timestamp'].dt.tz_localize('UTC').dt.tz_convert('Asia/Jakarta')
@@ -510,7 +673,6 @@ def show_data_management():
     st.dataframe(df_display, use_container_width=True)
     st.markdown("---")
     
-    # --- Fitur Hapus ---
     st.subheader("Hapus Data")
     list_timestamp = df['Timestamp'].tolist()
     selected_ts = st.selectbox("Pilih Data (Waktu)", list_timestamp)
@@ -529,7 +691,6 @@ def show_data_management():
     
     st.markdown("---")
     
-    # --- Fitur Sync Manual ---
     st.subheader("Cloud Backup")
     token, repo = get_github_secrets()
     if token and repo:
@@ -553,12 +714,13 @@ def main():
         else:
             with st.sidebar:
                 st.title("Menu Guest")
-                guest_menu = st.radio("Navigation", ["Rekap Lembur", "Tools PDF", "Input Durasi Lembur"])
+                guest_menu = st.radio("Navigation", ["Rekap Lembur", "Tools PDF", "Input Durasi Lembur", "Kalkulator TALENTA LMD"])
                 if st.button("Logout"): st.session_state.logged_in = False; st.rerun()
             
             if guest_menu == "Rekap Lembur": show_guest_view()
             elif guest_menu == "Tools PDF": show_pdf_tools()
             elif guest_menu == "Input Durasi Lembur": show_overtime_calculator()
+            elif guest_menu == "Kalkulator TALENTA LMD": show_talenta_calculator()
 
 if __name__ == "__main__":
     main()
