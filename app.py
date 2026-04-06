@@ -44,7 +44,7 @@ data_atasan = {
 }
 users_db = {"admin": "admin123", "hrd": "hrd123"}
 
-# --- FUNGSI GITHUB HELPER (PUSH FILE & DB) ---
+# --- FUNGSI GITHUB HELPER ---
 def get_github_secrets():
     try:
         token = st.secrets["GITHUB_TOKEN"]
@@ -128,7 +128,7 @@ def hitung_durasi(mulai_obj, selesai_obj):
     if total_menit > 0: teks_jam += f" {total_menit} menit"
     return f"{mulai_obj.strftime('%H:%M')} - {selesai_obj.strftime('%H:%M')} , {teks_jam}", total_jam + (total_menit / 60.0)
 
-def format_duration(td):
+def format_td(td):
     """Format timedelta ke string Jam Menit"""
     total_sec = td.total_seconds()
     if total_sec < 0:
@@ -139,8 +139,8 @@ def format_duration(td):
         return f"{h} Jam {m} Menit"
     return f"{h} Jam"
 
-def format_duration_minutes(td):
-    """Format timedelta ke string dengan menit saja"""
+def format_td_minutes(td):
+    """Format timedelta ke string Menit saja"""
     total_sec = td.total_seconds()
     if total_sec < 0:
         total_sec = 0
@@ -219,17 +219,17 @@ def show_pdf_tools():
                     st.download_button("📥 Download ZIP", data=zip_buffer, file_name="converted_docs.zip", mime="application/zip")
                 except Exception as e: st.error(f"Error: {e}")
 
-# --- FITUR KALKULATOR LEMBUR (LENGKAP) - LOGIKA DETAIL ---
+# --- FITUR KALKULATOR LEMBUR (LENGKAP) - LOGIKA SESUAI CASE ---
 def show_overtime_calculator():
     st.title("⏱️ Kalkulator Durasi Lembur")
     st.markdown("---")
-    st.markdown("Isi data dibawah ini untuk menghitung durasi lembur otomatis dengan detail.")
+    st.markdown("Isi data dibawah ini untuk menghitung durasi lembur otomatis.")
     
     col_date, col_weekend = st.columns([2, 1])
     with col_date: 
         tgl_lembur = st.date_input("Tanggal Lembur", value=date.today())
     with col_weekend: 
-        is_weekend = st.checkbox("Weekend / Holiday (Semua Jam Dihitung)", value=False)
+        is_weekend = st.checkbox("Weekend / Holiday (CASE 4)", value=False)
 
     st.markdown("#### 🕒 Jadwal Shift (System)")
     col_sched1, col_sched2 = st.columns(2)
@@ -241,9 +241,9 @@ def show_overtime_calculator():
     st.markdown("#### ⚡ Jadwal Lembur Aktual")
     col_ot1, col_ot2 = st.columns(2)
     with col_ot1: 
-        ot_in = st.time_input("Mulai Lembur", value=datetime.strptime("22:00", "%H:%M").time())
+        ot_in = st.time_input("Mulai Lembur", value=datetime.strptime("19:30", "%H:%M").time())
     with col_ot2: 
-        ot_out = st.time_input("Selesai Lembur", value=datetime.strptime("04:00", "%H:%M").time())
+        ot_out = st.time_input("Selesai Lembur", value=datetime.strptime("21:30", "%H:%M").time())
 
     if st.button("Hitung Durasi (SUBMIT)", type="primary"):
         # Buat datetime objects
@@ -253,13 +253,8 @@ def show_overtime_calculator():
         dt_ot_out = datetime.combine(tgl_lembur, ot_out)
         
         # Handle kasus melewati tengah malam
-        if dt_sched_out <= dt_sched_in:
-            dt_sched_out += timedelta(days=1)
-        
-        need_next_day = False
         if dt_ot_out <= dt_ot_in:
             dt_ot_out += timedelta(days=1)
-            need_next_day = True
         
         # Inisialisasi
         overtime_before = timedelta()
@@ -269,58 +264,58 @@ def show_overtime_calculator():
         case_name = "UNKNOWN"
         
         if is_weekend:
-            # CASE 4: Weekend/Holiday - semua jam dihitung
+            # CASE 4: Lembur di Hari Libur / Weekend
             case_name = "CASE 4: Lembur di Hari Libur / Weekend"
             total_duration = dt_ot_out - dt_ot_in
             overtime_after = total_duration
             
         else:
-            # ========== LOGIKA DETAIL ==========
-            
             # CEK JENIS LEMBUR
             
-            # CASE 3: Lembur Sebelum Jam Kerja (Dini Hari)
-            # Contoh: 00:00 - 08:00 (selesai sebelum shift masuk)
-            if dt_ot_out <= dt_sched_in:
+            # CASE 3: Lembur Sebelum Jam Kerja (Melewati Tengah Malam)
+            # Contoh: mulai 22:00, selesai 04:00 (melewati tengah malam)
+            if dt_ot_out <= dt_sched_in + timedelta(days=1) and dt_ot_in >= dt_sched_out:
+                # Lembur setelah shift yang melewati tengah malam
                 case_name = f"CASE 3: Lembur Sebelum Jam Kerja (Overnight)"
-                overtime_before = dt_ot_out - dt_ot_in
-                total_duration = overtime_before
                 
-            # CASE 1 & 2: Lembur Setelah Jam Kerja
-            # Contoh: 22:00 - 04:00 (melewati tengah malam)
-            elif dt_ot_in >= dt_sched_out or (need_next_day and ot_in < sched_in):
-                # Hitung break after (jeda antara jam pulang shift dengan jam mulai lembur)
+                # Break After = jeda dari jam pulang shift (17:30) sampai jam mulai lembur (22:00)
                 if dt_ot_in > dt_sched_out:
                     break_after = dt_ot_in - dt_sched_out
                 
-                # Lembur after = dari jam mulai sampai jam selesai
+                # Overtime After = dari jam mulai lembur sampai jam selesai lembur
                 overtime_after = dt_ot_out - dt_ot_in
-                
-                # Jika lembur melewati shift masuk berikutnya, kurangi waktu shift
-                if need_next_day and dt_ot_out > dt_sched_in + timedelta(days=1):
-                    # Lembur sampai setelah shift masuk, yang masuk shift tidak dihitung
-                    shift_duration = dt_sched_in + timedelta(days=1) - dt_ot_in
-                    if shift_duration.total_seconds() > 0:
-                        overtime_after = shift_duration
-                
-                case_name = f"CASE 2: Lembur Setelah Jam Kerja (Mulai Setelah {sched_out.strftime('%H:%M')})"
                 total_duration = overtime_after
                 
-            # CASE 1: Mulai sebelum jam pulang, selesai setelah jam pulang
+            # CASE 2: Lembur Setelah Jam Kerja (Mulai SETELAH jam pulang)
+            # Contoh: mulai 19:30, selesai 21:30
+            elif dt_ot_in >= dt_sched_out and dt_ot_out <= dt_sched_in + timedelta(days=1):
+                case_name = f"CASE 2: Lembur Setelah Jam Kerja (Dimulai Setelah {sched_out.strftime('%H:%M')})"
+                
+                # Break After = jeda dari jam pulang shift sampai jam mulai lembur
+                if dt_ot_in > dt_sched_out:
+                    break_after = dt_ot_in - dt_sched_out
+                
+                # Overtime After = dari jam mulai lembur sampai jam selesai lembur
+                overtime_after = dt_ot_out - dt_ot_in
+                total_duration = overtime_after
+                
+            # CASE 1: Lembur Setelah Jam Kerja (Mulai SEBELUM jam pulang)
+            # Contoh: mulai 17:00, selesai 21:00
             elif dt_ot_in < dt_sched_out and dt_ot_out > dt_sched_out:
-                case_name = f"CASE 1: Lembur Setelah Jam Kerja (Mulai Sebelum {sched_out.strftime('%H:%M')})"
+                case_name = f"CASE 1: Lembur Setelah Jam Kerja (Dimulai Sebelum {sched_out.strftime('%H:%M')})"
                 
-                # Hitung break if needed
+                # Overtime Before = dari jam mulai lembur sampai jam pulang shift
                 if dt_ot_in < dt_sched_out:
-                    # Ada jeda dari jam mulai lembur sampai jam pulang? Tidak, ini malah lembur sebelum pulang
-                    pass
+                    overtime_before = dt_sched_out - dt_ot_in
                 
-                # Lembur after = dari jam pulang sampai jam selesai
-                overtime_after = dt_ot_out - dt_sched_out
-                total_duration = overtime_after
+                # Overtime After = dari jam pulang shift sampai jam selesai lembur
+                if dt_ot_out > dt_sched_out:
+                    overtime_after = dt_ot_out - dt_sched_out
+                
+                total_duration = overtime_before + overtime_after
                 
             else:
-                # Fallback
+                # Fallback untuk kasus lain
                 total_duration = dt_ot_out - dt_ot_in
                 case_name = "CASE: Lembur Normal"
         
@@ -328,50 +323,44 @@ def show_overtime_calculator():
         if total_duration.total_seconds() < 0:
             total_duration = timedelta()
         
-        # Tampilkan hasil DETAIL
+        # Tampilkan hasil DETAIL sesuai contoh
         st.markdown("---")
-        st.subheader("📊 Hasil Perhitungan Detail")
+        st.subheader("📊 Hasil Perhitungan")
         
-        # Format tampilan
-        col1, col2 = st.columns(2)
+        st.markdown("**⏱️ Durasi Overtime Before:**")
+        if overtime_before.total_seconds() > 0:
+            st.write(f"{format_td(overtime_before)} ({format_td_minutes(overtime_before)})")
+        else:
+            st.write("Kosong")
         
-        with col1:
-            st.markdown("**⏱️ Durasi Overtime Before:**")
-            if overtime_before.total_seconds() > 0:
-                st.write(f"{format_duration(overtime_before)} ({format_duration_minutes(overtime_before)})")
-            else:
-                st.write("Kosong")
-            
-            st.markdown("**⏱️ Durasi Overtime After:**")
-            if overtime_after.total_seconds() > 0:
-                st.write(f"{format_duration(overtime_after)} ({format_duration_minutes(overtime_after)})")
-            else:
-                st.write("Kosong")
+        st.markdown("**⏱️ Durasi Overtime After:**")
+        if overtime_after.total_seconds() > 0:
+            st.write(f"{format_td(overtime_after)} ({format_td_minutes(overtime_after)})")
+        else:
+            st.write("Kosong")
         
-        with col2:
-            st.markdown("**⏸️ Durasi Overtime Break Before:**")
-            if break_before.total_seconds() > 0:
-                st.write(f"{format_duration(break_before)} ({format_duration_minutes(break_before)})")
-            else:
-                st.write("Kosong")
-            
-            st.markdown("**⏸️ Durasi Overtime Break After:**")
-            if break_after.total_seconds() > 0:
-                st.write(f"{format_duration(break_after)} ({format_duration_minutes(break_after)})")
-            else:
-                st.write("Kosong")
+        st.markdown("**⏸️ Durasi Overtime Break Before:**")
+        if break_before.total_seconds() > 0:
+            st.write(f"{format_td(break_before)} ({format_td_minutes(break_before)})")
+        else:
+            st.write("Kosong")
+        
+        st.markdown("**⏸️ Durasi Overtime Break After:**")
+        if break_after.total_seconds() > 0:
+            st.write(f"{format_td(break_after)} ({format_td_minutes(break_after)})")
+        else:
+            st.write("Kosong")
         
         st.markdown("---")
-        st.success(f"**✅ TOTAL LEMBUR: {format_duration(total_duration)} ({format_duration_minutes(total_duration)})**")
+        st.success(f"**✅ TOTAL LEMBUR: {format_td(total_duration)} ({format_td_minutes(total_duration)})**")
         st.caption(f"📌 Kategori: {case_name}")
         
-        # Tampilkan keterangan tambahan
-        with st.expander("ℹ️ Keterangan Perhitungan"):
-            st.markdown("""
-            - **Overtime Before**: Lembur yang terjadi SEBELUM jam shift dimulai (contoh: lembur dini hari 00:00-08:00)
-            - **Overtime After**: Lembur yang terjadi SETELAH jam shift selesai (contoh: lembur malam 22:00-04:00)
-            - **Break Before**: Jeda waktu antara jam mulai lembur dengan jam shift masuk (jika lembur sebelum shift)
-            - **Break After**: Jeda waktu antara jam shift selesai dengan jam mulai lembur (jika lembur setelah shift)
+        # Tampilkan detail perhitungan
+        with st.expander("📝 Detail Perhitungan"):
+            st.markdown(f"""
+            - **Shift System**: {sched_in.strftime('%H:%M')} - {sched_out.strftime('%H:%M')}
+            - **Lembur Aktual**: {ot_in.strftime('%H:%M')} - {ot_out.strftime('%H:%M')}
+            - **Total Durasi Lembur**: {format_td(total_duration)}
             """)
 
 # --- HALAMAN LOGIN ---
@@ -630,7 +619,7 @@ def show_data_management():
                 else:
                     st.error("❌ Gagal sync.")
     else:
-        st.error("❌ Secrets belum dissetting.")
+        st.error("❌ Secrets belum disetting.")
 
 # --- MAIN LOGIC ---
 def main():
