@@ -129,7 +129,6 @@ def hitung_durasi(mulai_obj, selesai_obj):
     return f"{mulai_obj.strftime('%H:%M')} - {selesai_obj.strftime('%H:%M')} , {teks_jam}", total_jam + (total_menit / 60.0)
 
 def format_td(td):
-    """Format timedelta ke string Jam Menit"""
     total_sec = td.total_seconds()
     if total_sec < 0:
         total_sec = 0
@@ -140,7 +139,6 @@ def format_td(td):
     return f"{h} Jam"
 
 def format_td_minutes(td):
-    """Format timedelta ke string Menit saja"""
     total_sec = td.total_seconds()
     if total_sec < 0:
         total_sec = 0
@@ -241,9 +239,9 @@ def show_overtime_calculator():
     st.markdown("#### ⚡ Jadwal Lembur Aktual")
     col_ot1, col_ot2 = st.columns(2)
     with col_ot1: 
-        ot_in = st.time_input("Mulai Lembur", value=datetime.strptime("19:30", "%H:%M").time())
+        ot_in = st.time_input("Mulai Lembur", value=datetime.strptime("22:00", "%H:%M").time())
     with col_ot2: 
-        ot_out = st.time_input("Selesai Lembur", value=datetime.strptime("21:30", "%H:%M").time())
+        ot_out = st.time_input("Selesai Lembur", value=datetime.strptime("04:00", "%H:%M").time())
 
     if st.button("Hitung Durasi (SUBMIT)", type="primary"):
         # Buat datetime objects
@@ -256,11 +254,15 @@ def show_overtime_calculator():
         if dt_ot_out <= dt_ot_in:
             dt_ot_out += timedelta(days=1)
         
+        # Handle shift yang melewati tengah malam (jarang terjadi)
+        if dt_sched_out <= dt_sched_in:
+            dt_sched_out += timedelta(days=1)
+        
         # Inisialisasi
-        overtime_before = timedelta()
-        overtime_after = timedelta()
-        break_before = timedelta()
-        break_after = timedelta()
+        overtime_before = timedelta()   # Lembur sebelum jam pulang (dari mulai lembur ke jam pulang)
+        overtime_after = timedelta()    # Lembur setelah jam pulang (dari jam pulang ke selesai lembur)
+        break_before = timedelta()      # Jeda sebelum shift
+        break_after = timedelta()       # Jeda setelah shift (dari jam pulang ke mulai lembur)
         case_name = "UNKNOWN"
         
         if is_weekend:
@@ -272,30 +274,32 @@ def show_overtime_calculator():
         else:
             # CEK JENIS LEMBUR
             
-            # CASE 3: Lembur Sebelum Jam Kerja (Melewati Tengah Malam)
-            # Contoh: mulai 22:00, selesai 04:00 (melewati tengah malam)
-            if dt_ot_out <= dt_sched_in + timedelta(days=1) and dt_ot_in >= dt_sched_out:
-                # Lembur setelah shift yang melewati tengah malam
-                case_name = f"CASE 3: Lembur Sebelum Jam Kerja (Overnight)"
+            # CASE 3: Lembur Sebelum Jam Kerja (Melewati Tengah Malam / Overnight)
+            # Contoh: mulai 22:00, selesai 04:00
+            # Ciri: mulai lembur SETELAH jam pulang shift, dan selesai lembur KURANG DARI jam mulai shift besoknya
+            if dt_ot_in >= dt_sched_out and dt_ot_out <= dt_sched_in + timedelta(days=1):
+                case_name = f"CASE 3: Lembur Sebelum Jam Kerja (Overnight) - Dimulai Setelah {sched_out.strftime('%H:%M')}"
                 
-                # Break After = jeda dari jam pulang shift (17:30) sampai jam mulai lembur (22:00)
+                # Break After = jeda dari jam pulang shift (17:30) sampai jam mulai lembur (22:00) = 4 jam 30 menit
                 if dt_ot_in > dt_sched_out:
                     break_after = dt_ot_in - dt_sched_out
                 
-                # Overtime After = dari jam mulai lembur sampai jam selesai lembur
-                overtime_after = dt_ot_out - dt_ot_in
-                total_duration = overtime_after
+                # Overtime After = durasi dari jam pulang shift (17:30) sampai jam selesai lembur (04:00) = 10 jam 30 menit
+                overtime_after = dt_ot_out - dt_sched_out
                 
-            # CASE 2: Lembur Setelah Jam Kerja (Mulai SETELAH jam pulang)
+                # Total lembur = durasi dari mulai lembur sampai selesai lembur = 6 jam
+                total_duration = dt_ot_out - dt_ot_in
+                
+            # CASE 2: Lembur Setelah Jam Kerja (Mulai SETELAH jam pulang, selesai SEBELUM tengah malam)
             # Contoh: mulai 19:30, selesai 21:30
-            elif dt_ot_in >= dt_sched_out and dt_ot_out <= dt_sched_in + timedelta(days=1):
+            elif dt_ot_in >= dt_sched_out and dt_ot_out <= dt_sched_in:
                 case_name = f"CASE 2: Lembur Setelah Jam Kerja (Dimulai Setelah {sched_out.strftime('%H:%M')})"
                 
                 # Break After = jeda dari jam pulang shift sampai jam mulai lembur
                 if dt_ot_in > dt_sched_out:
                     break_after = dt_ot_in - dt_sched_out
                 
-                # Overtime After = dari jam mulai lembur sampai jam selesai lembur
+                # Overtime After = durasi lembur sebenarnya (dari mulai sampai selesai)
                 overtime_after = dt_ot_out - dt_ot_in
                 total_duration = overtime_after
                 
@@ -304,18 +308,27 @@ def show_overtime_calculator():
             elif dt_ot_in < dt_sched_out and dt_ot_out > dt_sched_out:
                 case_name = f"CASE 1: Lembur Setelah Jam Kerja (Dimulai Sebelum {sched_out.strftime('%H:%M')})"
                 
-                # Overtime Before = dari jam mulai lembur sampai jam pulang shift
+                # Overtime Before = dari jam mulai lembur sampai jam pulang shift (17:30 - 17:00 = 30 menit)
                 if dt_ot_in < dt_sched_out:
                     overtime_before = dt_sched_out - dt_ot_in
                 
-                # Overtime After = dari jam pulang shift sampai jam selesai lembur
+                # Overtime After = dari jam pulang shift sampai jam selesai lembur (21:00 - 17:30 = 3 jam 30 menit)
                 if dt_ot_out > dt_sched_out:
                     overtime_after = dt_ot_out - dt_sched_out
                 
                 total_duration = overtime_before + overtime_after
                 
+            # CASE Lain: Lembur sebelum jam kerja (mulai sebelum shift, selesai sebelum shift)
+            # Contoh: mulai 00:00, selesai 08:00
+            elif dt_ot_out <= dt_sched_in:
+                case_name = f"CASE: Lembur Sebelum Jam Kerja (Dini Hari)"
+                
+                # Overtime Before = durasi lembur sebenarnya
+                overtime_before = dt_ot_out - dt_ot_in
+                total_duration = overtime_before
+                
             else:
-                # Fallback untuk kasus lain
+                # Fallback
                 total_duration = dt_ot_out - dt_ot_in
                 case_name = "CASE: Lembur Normal"
         
@@ -360,7 +373,9 @@ def show_overtime_calculator():
             st.markdown(f"""
             - **Shift System**: {sched_in.strftime('%H:%M')} - {sched_out.strftime('%H:%M')}
             - **Lembur Aktual**: {ot_in.strftime('%H:%M')} - {ot_out.strftime('%H:%M')}
-            - **Total Durasi Lembur**: {format_td(total_duration)}
+            - **Overtime After (dari jam pulang ke selesai)**: {format_td(overtime_after)}
+            - **Break After (jeda dari jam pulang ke mulai)**: {format_td(break_after)}
+            - **Total Lembur (dari mulai ke selesai)**: {format_td(total_duration)}
             """)
 
 # --- HALAMAN LOGIN ---
@@ -619,7 +634,7 @@ def show_data_management():
                 else:
                     st.error("❌ Gagal sync.")
     else:
-        st.error("❌ Secrets belum disetting.")
+        st.error("❌ Secrets belum dissetting.")
 
 # --- MAIN LOGIC ---
 def main():
