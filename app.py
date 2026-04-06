@@ -54,7 +54,6 @@ def get_github_secrets():
         return None, None
 
 def push_to_github(file_path, repo_path, commit_message):
-    """Fungsi universal untuk push file apapun ke GitHub"""
     token, repo_name = get_github_secrets()
     if not token or not repo_name:
         return False
@@ -95,8 +94,6 @@ def save_to_db(data):
     new_df = pd.DataFrame([data])
     df = pd.concat([df, new_df], ignore_index=True)
     df.to_csv(DB_FILE, index=False)
-    
-    # Auto Sync Database ke GitHub
     push_to_github(DB_FILE, DB_FILE, f"Update DB: {data['Nama']}")
 
 def load_db():
@@ -130,6 +127,25 @@ def hitung_durasi(mulai_obj, selesai_obj):
     teks_jam = f"{total_jam} jam"
     if total_menit > 0: teks_jam += f" {total_menit} menit"
     return f"{mulai_obj.strftime('%H:%M')} - {selesai_obj.strftime('%H:%M')} , {teks_jam}", total_jam + (total_menit / 60.0)
+
+def format_duration(td):
+    """Format timedelta ke string Jam Menit"""
+    total_sec = td.total_seconds()
+    if total_sec < 0:
+        total_sec = 0
+    h = int(total_sec // 3600)
+    m = int((total_sec % 3600) // 60)
+    if m > 0:
+        return f"{h} Jam {m} Menit"
+    return f"{h} Jam"
+
+def format_duration_minutes(td):
+    """Format timedelta ke string dengan menit saja"""
+    total_sec = td.total_seconds()
+    if total_sec < 0:
+        total_sec = 0
+    minutes = int(total_sec // 60)
+    return f"{minutes} Menit"
 
 # --- FUNGSI TOOLS PDF ---
 def show_pdf_tools():
@@ -203,31 +219,31 @@ def show_pdf_tools():
                     st.download_button("📥 Download ZIP", data=zip_buffer, file_name="converted_docs.zip", mime="application/zip")
                 except Exception as e: st.error(f"Error: {e}")
 
-# --- FITUR KALKULATOR LEMBUR (LENGKAP) - LOGIKA DIPERBAIKI ---
+# --- FITUR KALKULATOR LEMBUR (LENGKAP) - LOGIKA DETAIL ---
 def show_overtime_calculator():
-    st.title("⏱️ Input Durasi Lembur")
+    st.title("⏱️ Kalkulator Durasi Lembur")
     st.markdown("---")
-    st.markdown("Isi data dibawah ini untuk menghitung durasi lembur otomatis.")
+    st.markdown("Isi data dibawah ini untuk menghitung durasi lembur otomatis dengan detail.")
     
     col_date, col_weekend = st.columns([2, 1])
     with col_date: 
         tgl_lembur = st.date_input("Tanggal Lembur", value=date.today())
     with col_weekend: 
-        is_weekend = st.checkbox("Weekend / Holiday (CASE 4)", value=False)
+        is_weekend = st.checkbox("Weekend / Holiday (Semua Jam Dihitung)", value=False)
 
     st.markdown("#### 🕒 Jadwal Shift (System)")
     col_sched1, col_sched2 = st.columns(2)
     with col_sched1: 
-        sched_in = st.time_input("Mulai Shift (System)", value=datetime.strptime("08:30", "%H:%M").time(), disabled=is_weekend)
+        sched_in = st.time_input("Mulai Shift (System)", value=datetime.strptime("08:30", "%H:%M").time())
     with col_sched2: 
-        sched_out = st.time_input("Pulang Shift (System)", value=datetime.strptime("17:30", "%H:%M").time(), disabled=is_weekend)
+        sched_out = st.time_input("Pulang Shift (System)", value=datetime.strptime("17:30", "%H:%M").time())
 
     st.markdown("#### ⚡ Jadwal Lembur Aktual")
     col_ot1, col_ot2 = st.columns(2)
     with col_ot1: 
-        ot_in = st.time_input("Mulai Lembur", value=datetime.strptime("00:00", "%H:%M").time())
+        ot_in = st.time_input("Mulai Lembur", value=datetime.strptime("22:00", "%H:%M").time())
     with col_ot2: 
-        ot_out = st.time_input("Selesai Lembur", value=datetime.strptime("08:00", "%H:%M").time())
+        ot_out = st.time_input("Selesai Lembur", value=datetime.strptime("04:00", "%H:%M").time())
 
     if st.button("Hitung Durasi (SUBMIT)", type="primary"):
         # Buat datetime objects
@@ -236,55 +252,72 @@ def show_overtime_calculator():
         dt_ot_in = datetime.combine(tgl_lembur, ot_in)
         dt_ot_out = datetime.combine(tgl_lembur, ot_out)
         
-        # Handle kasus melewati tengah malam untuk shift
+        # Handle kasus melewati tengah malam
         if dt_sched_out <= dt_sched_in:
             dt_sched_out += timedelta(days=1)
         
-        # Handle kasus lembur yang melewati tengah malam
-        # Jika jam selesai <= jam mulai, berarti lewat tengah malam
+        need_next_day = False
         if dt_ot_out <= dt_ot_in:
             dt_ot_out += timedelta(days=1)
+            need_next_day = True
         
-        # LOGIKA CASE YANG BENAR
-        dur_before = timedelta()
-        dur_after = timedelta()
+        # Inisialisasi
+        overtime_before = timedelta()
+        overtime_after = timedelta()
         break_before = timedelta()
         break_after = timedelta()
         case_name = "UNKNOWN"
-        
-        def format_td(td):
-            total_sec = td.total_seconds()
-            if total_sec < 0:
-                total_sec = 0
-            h = int(total_sec // 3600)
-            m = int((total_sec % 3600) // 60)
-            return f"{h} Jam {m} Menit"
         
         if is_weekend:
             # CASE 4: Weekend/Holiday - semua jam dihitung
             case_name = "CASE 4: Lembur di Hari Libur / Weekend"
             total_duration = dt_ot_out - dt_ot_in
+            overtime_after = total_duration
             
         else:
-            # CEK JENIS LEMBUR BERDASARKAN WAKTU
+            # ========== LOGIKA DETAIL ==========
+            
+            # CEK JENIS LEMBUR
             
             # CASE 3: Lembur Sebelum Jam Kerja (Dini Hari)
-            # Kondisi: Mulai dan selesai sebelum shift masuk ATAU melewati tengah malam sampai sebelum shift
+            # Contoh: 00:00 - 08:00 (selesai sebelum shift masuk)
             if dt_ot_out <= dt_sched_in:
-                case_name = f"CASE 3: Lembur Sebelum Jam Kerja (Overnight) - {ot_in.strftime('%H:%M')} s.d {ot_out.strftime('%H:%M')}"
-                total_duration = dt_ot_out - dt_ot_in
+                case_name = f"CASE 3: Lembur Sebelum Jam Kerja (Overnight)"
+                overtime_before = dt_ot_out - dt_ot_in
+                total_duration = overtime_before
                 
-            # CASE 1 & 2: Lembur setelah jam kerja
-            elif dt_ot_in >= dt_sched_out:
-                # CASE 2: Mulai setelah jam pulang
-                case_name = f"CASE 2: Lembur Setelah Jam Kerja (Dimulai Setelah {sched_out.strftime('%H:%M')})"
-                total_duration = dt_ot_out - dt_ot_in
+            # CASE 1 & 2: Lembur Setelah Jam Kerja
+            # Contoh: 22:00 - 04:00 (melewati tengah malam)
+            elif dt_ot_in >= dt_sched_out or (need_next_day and ot_in < sched_in):
+                # Hitung break after (jeda antara jam pulang shift dengan jam mulai lembur)
+                if dt_ot_in > dt_sched_out:
+                    break_after = dt_ot_in - dt_sched_out
                 
+                # Lembur after = dari jam mulai sampai jam selesai
+                overtime_after = dt_ot_out - dt_ot_in
+                
+                # Jika lembur melewati shift masuk berikutnya, kurangi waktu shift
+                if need_next_day and dt_ot_out > dt_sched_in + timedelta(days=1):
+                    # Lembur sampai setelah shift masuk, yang masuk shift tidak dihitung
+                    shift_duration = dt_sched_in + timedelta(days=1) - dt_ot_in
+                    if shift_duration.total_seconds() > 0:
+                        overtime_after = shift_duration
+                
+                case_name = f"CASE 2: Lembur Setelah Jam Kerja (Mulai Setelah {sched_out.strftime('%H:%M')})"
+                total_duration = overtime_after
+                
+            # CASE 1: Mulai sebelum jam pulang, selesai setelah jam pulang
             elif dt_ot_in < dt_sched_out and dt_ot_out > dt_sched_out:
-                # CASE 1: Mulai sebelum jam pulang, selesai setelah jam pulang
-                case_name = f"CASE 1: Lembur Setelah Jam Kerja (Dimulai Sebelum {sched_out.strftime('%H:%M')})"
-                # Hitung lembur hanya dari jam pulang sampai selesai
-                total_duration = dt_ot_out - dt_sched_out
+                case_name = f"CASE 1: Lembur Setelah Jam Kerja (Mulai Sebelum {sched_out.strftime('%H:%M')})"
+                
+                # Hitung break if needed
+                if dt_ot_in < dt_sched_out:
+                    # Ada jeda dari jam mulai lembur sampai jam pulang? Tidak, ini malah lembur sebelum pulang
+                    pass
+                
+                # Lembur after = dari jam pulang sampai jam selesai
+                overtime_after = dt_ot_out - dt_sched_out
+                total_duration = overtime_after
                 
             else:
                 # Fallback
@@ -295,21 +328,51 @@ def show_overtime_calculator():
         if total_duration.total_seconds() < 0:
             total_duration = timedelta()
         
-        # Tampilkan hasil
+        # Tampilkan hasil DETAIL
         st.markdown("---")
-        st.subheader("📊 Hasil Perhitungan")
+        st.subheader("📊 Hasil Perhitungan Detail")
         
-        col_res1, col_res2 = st.columns(2)
-        with col_res1:
-            st.metric("Waktu Mulai Lembur", ot_in.strftime('%H:%M'))
-            st.metric("Waktu Selesai Lembur", ot_out.strftime('%H:%M'))
-        with col_res2:
-            st.metric("Shift Mulai", sched_in.strftime('%H:%M'))
-            st.metric("Shift Selesai", sched_out.strftime('%H:%M'))
+        # Format tampilan
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**⏱️ Durasi Overtime Before:**")
+            if overtime_before.total_seconds() > 0:
+                st.write(f"{format_duration(overtime_before)} ({format_duration_minutes(overtime_before)})")
+            else:
+                st.write("Kosong")
+            
+            st.markdown("**⏱️ Durasi Overtime After:**")
+            if overtime_after.total_seconds() > 0:
+                st.write(f"{format_duration(overtime_after)} ({format_duration_minutes(overtime_after)})")
+            else:
+                st.write("Kosong")
+        
+        with col2:
+            st.markdown("**⏸️ Durasi Overtime Break Before:**")
+            if break_before.total_seconds() > 0:
+                st.write(f"{format_duration(break_before)} ({format_duration_minutes(break_before)})")
+            else:
+                st.write("Kosong")
+            
+            st.markdown("**⏸️ Durasi Overtime Break After:**")
+            if break_after.total_seconds() > 0:
+                st.write(f"{format_duration(break_after)} ({format_duration_minutes(break_after)})")
+            else:
+                st.write("Kosong")
         
         st.markdown("---")
-        st.success(f"**TOTAL LEMBUR: {format_td(total_duration)}**")
-        st.caption(f"Kategori: {case_name}")
+        st.success(f"**✅ TOTAL LEMBUR: {format_duration(total_duration)} ({format_duration_minutes(total_duration)})**")
+        st.caption(f"📌 Kategori: {case_name}")
+        
+        # Tampilkan keterangan tambahan
+        with st.expander("ℹ️ Keterangan Perhitungan"):
+            st.markdown("""
+            - **Overtime Before**: Lembur yang terjadi SEBELUM jam shift dimulai (contoh: lembur dini hari 00:00-08:00)
+            - **Overtime After**: Lembur yang terjadi SETELAH jam shift selesai (contoh: lembur malam 22:00-04:00)
+            - **Break Before**: Jeda waktu antara jam mulai lembur dengan jam shift masuk (jika lembur sebelum shift)
+            - **Break After**: Jeda waktu antara jam shift selesai dengan jam mulai lembur (jika lembur setelah shift)
+            """)
 
 # --- HALAMAN LOGIN ---
 def show_login_page():
@@ -328,7 +391,7 @@ def show_login_page():
             if st.button("Login as Guest", use_container_width=True):
                 st.session_state.logged_in = True; st.session_state.role = "Guest"; st.session_state.username = "Guest"; st.rerun()
 
-# --- HALAMAN GUEST (DENGAN FILTER NAMA) ---
+# --- HALAMAN GUEST ---
 def show_guest_view():
     st.title("👥 Rekap & Download Lembur")
     st.markdown("---")
@@ -338,20 +401,15 @@ def show_guest_view():
         return
 
     df['Timestamp'] = pd.to_datetime(df['Timestamp'])
-    # PERUBAHAN: Konversi ke UTC+7 (Jakarta/Hanoi)
     df['Timestamp'] = df['Timestamp'].dt.tz_localize('UTC').dt.tz_convert('Asia/Jakarta')
     df['Bulan'] = df['Timestamp'].dt.to_period('M').astype(str)
     list_bulan = df['Bulan'].unique()
     pilih_bulan = st.selectbox("Pilih Bulan", list_bulan)
     
-    # Filter bulan
     df_filtered_month = df[df['Bulan'] == pilih_bulan]
-    
-    # --- FITUR BARU: FILTER KARYAWAN ---
     list_nama = df_filtered_month['Nama'].unique()
     pilih_nama = st.selectbox("Pilih Karyawan", ["Semua"] + list(list_nama))
 
-    # Terapkan filter
     if pilih_nama == "Semua": 
         df_show = df_filtered_month
     else: 
@@ -359,9 +417,7 @@ def show_guest_view():
 
     st.markdown("---")
     if not df_show.empty:
-        # PERUBAHAN: Total jam bisa menampilkan desimal (misal 3.5 untuk 3 jam 30 menit)
         total_jam = df_show['Total_Jam'].sum()
-        # Format biar rapih: kalo ada desimal .5 -> jadi "X jam 30 menit"
         jam_bulat = int(total_jam)
         menit_bulat = int((total_jam - jam_bulat) * 60)
         if menit_bulat > 0:
@@ -374,7 +430,6 @@ def show_guest_view():
             with st.container():
                 col_info, col_btn = st.columns([3, 1])
                 with col_info:
-                    # PERUBAHAN: Display durasi dengan menit
                     jam_val = row['Total_Jam']
                     jam_int = int(jam_val)
                     menit_int = int((jam_val - jam_int) * 60)
@@ -408,7 +463,7 @@ def show_admin_view():
     elif menu == "Tools PDF": show_pdf_tools()
     elif menu == "Input Durasi Lembur": show_overtime_calculator()
 
-# --- SUB-MENU ADMIN: FORM (OTOMATIS + PUSH DOCX) ---
+# --- SUB-MENU ADMIN: FORM ---
 def show_form_content():
     st.title("📄 Form Surat Tugas Lembur")
     st.markdown("---")
@@ -455,7 +510,6 @@ def show_form_content():
             file_path = os.path.join(DOCS_FOLDER, filename)
             doc.save(file_path)
             
-            # --- AUTO PUSH FILE DOCX KE GITHUB ---
             repo_file_path = f"{DOCS_FOLDER}/{filename}"
             push_success = push_to_github(file_path, repo_file_path, f"Add Surat: {pilih_nama}")
             
@@ -464,7 +518,6 @@ def show_form_content():
             else:
                 st.toast("⚠️ File hanya tersimpan lokal (Gagal sync ke GitHub).", icon="⚠️")
 
-            # PERUBAHAN: Timestamp pakai UTC+7 (Jakarta/Hanoi)
             now_jakarta = datetime.now(timezone(timedelta(hours=7)))
             
             save_to_db({
@@ -478,14 +531,13 @@ def show_form_content():
             st.download_button("📥 Download", data=buffer, file_name=filename)
         except Exception as e: st.error(f"Error: {e}")
 
-# --- SUB-MENU ADMIN: DASHBOARD (PER ORANG) ---
+# --- SUB-MENU ADMIN: DASHBOARD ---
 def show_dashboard():
     st.title("📊 Dashboard Rekap Lembur")
     df = load_db()
     if df.empty: st.warning("Data masih kosong."); return
 
     df['Timestamp'] = pd.to_datetime(df['Timestamp'])
-    # PERUBAHAN: Konversi ke UTC+7
     df['Timestamp'] = df['Timestamp'].dt.tz_localize('UTC').dt.tz_convert('Asia/Jakarta')
     df['Bulan'] = df['Timestamp'].dt.to_period('M').astype(str)
     
@@ -501,7 +553,6 @@ def show_dashboard():
         with st.container():
             col_nama, col_jam, col_aksi = st.columns([2, 1, 1])
             col_nama.write(f"**{row['Nama']}**")
-            # PERUBAHAN: Display jam dengan menit
             jam_val = row['Total_Jam']
             jam_int = int(jam_val)
             menit_int = int((jam_val - jam_int) * 60)
@@ -517,7 +568,6 @@ def show_dashboard():
                 with st.expander("Detail"):
                     if not files_person.empty:
                         for x, data_row in files_person.iterrows():
-                            # PERUBAHAN: Display durasi per item dengan menit
                             jam_item = data_row['Total_Jam']
                             jam_i = int(jam_item)
                             menit_i = int((jam_item - jam_i) * 60)
@@ -537,13 +587,12 @@ def show_dashboard():
                                 st.caption("File tidak ditemukan")
         st.markdown("---")
 
-# --- SUB-MENU ADMIN: DATA & HAPUS (FIXED) ---
+# --- SUB-MENU ADMIN: DATA & HAPUS ---
 def show_data_management():
     st.title("⚙️ Manajemen Data Lembur")
     df = load_db()
     if df.empty: st.info("Tidak ada data."); return
     
-    # PERUBAHAN: Tampilkan timestamp dalam UTC+7
     df_display = df.copy()
     df_display['Timestamp'] = pd.to_datetime(df_display['Timestamp'])
     df_display['Timestamp'] = df_display['Timestamp'].dt.tz_localize('UTC').dt.tz_convert('Asia/Jakarta')
@@ -552,7 +601,6 @@ def show_data_management():
     st.dataframe(df_display, use_container_width=True)
     st.markdown("---")
     
-    # --- Fitur Hapus ---
     st.subheader("Hapus Data")
     list_timestamp = df['Timestamp'].tolist()
     selected_ts = st.selectbox("Pilih Data (Waktu)", list_timestamp)
@@ -571,7 +619,6 @@ def show_data_management():
     
     st.markdown("---")
     
-    # --- Fitur Sync Manual ---
     st.subheader("Cloud Backup")
     token, repo = get_github_secrets()
     if token and repo:
@@ -583,7 +630,7 @@ def show_data_management():
                 else:
                     st.error("❌ Gagal sync.")
     else:
-        st.error("❌ Secrets belum disetting.")
+        st.error("❌ Secrets belum dissetting.")
 
 # --- MAIN LOGIC ---
 def main():
