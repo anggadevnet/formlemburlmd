@@ -8,7 +8,6 @@ import tempfile
 import zipfile
 import subprocess
 import shutil
-import json
 
 # --- IMPORT PDF (VERSI AMAN) ---
 try:
@@ -140,9 +139,6 @@ def format_td(td):
     return f"{h} Jam"
 
 # ============ FUNGSI KALKULATOR GAJI ============
-# Libur Nasional 2026 (Format DD/MM)
-LIBUR_NASIONAL = ["01/01", "17/02", "03/04", "01/05", "17/08", "25/12"]
-
 def get_upah_per_jam(gaji):
     return gaji / 173
 
@@ -154,14 +150,14 @@ def calc_weekday(eff_jam, up_per_jam):
     """Rumus Weekday berdasarkan PP 35/2021"""
     total = 0
     if eff_jam >= 1:
-        total += 1.5 * up_per_jam  # Jam 1
+        total += 1.5 * up_per_jam
     if eff_jam >= 2:
         jam2_8 = min(eff_jam - 1, 7)
-        total += jam2_8 * 2 * up_per_jam  # Jam 2-8
+        total += jam2_8 * 2 * up_per_jam
     if eff_jam >= 9:
-        total += 1 * 3 * up_per_jam  # Jam 9
+        total += 1 * 3 * up_per_jam
     if eff_jam >= 10:
-        total += (eff_jam - 9) * 4 * up_per_jam  # Jam 10+
+        total += (eff_jam - 9) * 4 * up_per_jam
     return round(total)
 
 def calc_weekend(eff_jam, up_per_jam):
@@ -175,100 +171,137 @@ def calc_weekend(eff_jam, up_per_jam):
         total = (8 * 2 * up_per_jam) + (1 * 3 * up_per_jam) + ((eff_jam - 9) * 4 * up_per_jam)
     return round(total)
 
-def cek_tipe_hari(tgl_obj, force_libur):
-    """Cek tipe hari: Weekday atau Weekend/Libur"""
-    if force_libur:
-        return "Weekend (Paksa Libur)"
-    ddmm = tgl_obj.strftime("%d/%m")
-    day = tgl_obj.weekday()  # 0=Senin, 6=Minggu
-    if ddmm in LIBUR_NASIONAL:
-        return "Weekend (Libur Nasional)"
-    if day >= 5:  # Sabtu(5) atau Minggu(6)
+# --- DATA LIBUR NASIONAL INDONESIA 2025-2026 ---
+LIBUR_NASIONAL = {
+    "2025-01-01": "Tahun Baru Masehi",
+    "2025-03-29": "Hari Raya Nyepi",
+    "2025-03-31": "Idul Fitri 1446 H",
+    "2025-04-01": "Idul Fitri 1446 H",
+    "2025-05-01": "Hari Buruh",
+    "2025-05-12": "Hari Raya Waisak",
+    "2025-05-29": "Kenaikan Yesus Kristus",
+    "2025-06-01": "Hari Lahir Pancasila",
+    "2025-06-27": "Idul Adha 1446 H",
+    "2025-07-17": "Tahun Baru Islam 1447 H",
+    "2025-08-17": "HUT Kemerdekaan RI",
+    "2025-09-05": "Maulid Nabi Muhammad SAW",
+    "2025-12-25": "Hari Raya Natal",
+    "2026-01-01": "Tahun Baru Masehi",
+    "2026-03-19": "Hari Raya Nyepi",
+    "2026-03-20": "Idul Fitri 1447 H",
+    "2026-03-21": "Idul Fitri 1447 H",
+    "2026-05-01": "Hari Buruh",
+    "2026-05-04": "Hari Raya Waisak",
+    "2026-05-14": "Kenaikan Yesus Kristus",
+    "2026-06-01": "Hari Lahir Pancasila",
+    "2026-06-17": "Idul Adha 1447 H",
+    "2026-07-07": "Tahun Baru Islam 1448 H",
+    "2026-08-17": "HUT Kemerdekaan RI",
+    "2026-08-25": "Maulid Nabi Muhammad SAW",
+    "2026-12-25": "Hari Raya Natal",
+}
+
+# --- CUTI BERSAMA 2025-2026 ---
+CUTI_BERSAMA = {
+    "2025-03-28": "Cuti Bersama Nyepi",
+    "2025-04-02": "Cuti Bersama Idul Fitri",
+    "2025-04-03": "Cuti Bersama Idul Fitri",
+    "2025-04-04": "Cuti Bersama Idul Fitri",
+    "2025-04-07": "Cuti Bersama Idul Fitri",
+    "2025-05-13": "Cuti Bersama Waisak",
+    "2025-06-30": "Cuti Bersama Idul Adha",
+    "2025-12-26": "Cuti Bersama Natal",
+    "2026-03-18": "Cuti Bersama Nyepi",
+    "2026-03-22": "Cuti Bersama Idul Fitri",
+    "2026-03-23": "Cuti Bersama Idul Fitri",
+    "2026-03-24": "Cuti Bersama Idul Fitri",
+    "2026-12-28": "Cuti Bersama Natal",
+}
+
+def cek_tipe_hari(tgl_obj):
+    """Cek tipe hari: Weekday, Weekend, atau Libur Nasional/Cuti Bersama"""
+    tgl_str = tgl_obj.strftime("%Y-%m-%d")
+    
+    if tgl_str in LIBUR_NASIONAL:
+        return f"Libur Nasional ({LIBUR_NASIONAL[tgl_str]})"
+    
+    if tgl_str in CUTI_BERSAMA:
+        return f"Cuti Bersama ({CUTI_BERSAMA[tgl_str]})"
+    
+    day = tgl_obj.weekday()
+    if day >= 5:
         return "Weekend"
-    return "Weekday"
+    
+    return "Hari Kerja"
 
 # --- FITUR KALKULATOR GAJI DAN LEMBUR ---
 def show_gaji_calculator():
     st.title("💰 Kalkulator Gaji & Lembur")
     st.markdown("---")
     
-    # Session state untuk menyimpan data lembur
     if 'data_lembur' not in st.session_state:
         st.session_state.data_lembur = []
     
-    # Input Gaji
     col1, col2 = st.columns(2)
     with col1:
-        pilih_karyawan = st.selectbox("Pilih Karyawan (Opsional)", ["Manual"] + list(master_karyawan.keys()))
-        if pilih_karyawan != "Manual":
-            gaji_pokok = master_karyawan[pilih_karyawan]["gaji"]
-            st.info(f"Gaji {pilih_karyawan}: Rp {gaji_pokok:,.0f}")
-        else:
-            gaji_pokok = st.number_input("Gaji Pokok", min_value=0, value=5447000, step=100000, format="%d")
+        gaji_pokok = st.number_input("Gaji Pokok", min_value=0, value=5447000, step=100000, format="%d")
     with col2:
         st.metric("Upah per Jam", f"Rp {get_upah_per_jam(gaji_pokok):,.0f}")
     
     st.markdown("---")
     st.subheader("📝 Input Data Lembur")
     
-    # Input Date Range
     col_tgl1, col_tgl2 = st.columns(2)
     with col_tgl1:
         tgl_mulai = st.date_input("Tanggal Mulai", value=date.today())
     with col_tgl2:
         tgl_selesai = st.date_input("Tanggal Selesai", value=date.today())
     
-    # Input Jam
     col_jam1, col_jam2 = st.columns(2)
     with col_jam1:
         jam_mulai = st.time_input("Jam Mulai", value=datetime.strptime("17:00", "%H:%M").time())
     with col_jam2:
         jam_selesai = st.time_input("Jam Selesai", value=datetime.strptime("22:00", "%H:%M").time())
     
-    force_libur = st.checkbox("Paksa Libur (Cuti/Hari Libur)")
+    col_add, col_space = st.columns([1, 3])
+    with col_add:
+        if st.button("➕ TAMBAH DATA LEMBUR", type="primary", use_container_width=True):
+            d1 = datetime.combine(tgl_mulai, jam_mulai)
+            d2 = datetime.combine(tgl_selesai, jam_selesai)
+            
+            if d2 <= d1:
+                d2 += timedelta(days=1)
+            
+            current = d1
+            added_count = 0
+            
+            while current < d2:
+                end_of_day = current.replace(hour=23, minute=59, second=59, microsecond=999999)
+                segment_end = min(d2, end_of_day)
+                
+                hours = (segment_end - current).total_seconds() / 3600
+                exact_hours = hours
+                
+                tipe = cek_tipe_hari(current)
+                is_weekend = ("Libur" in tipe or "Cuti" in tipe or "Weekend" in tipe)
+                
+                st.session_state.data_lembur.append({
+                    "tanggal": current.strftime("%Y-%m-%d"),
+                    "tipe": tipe,
+                    "raw_jam": exact_hours,
+                    "is_weekend": is_weekend
+                })
+                
+                added_count += 1
+                current = (end_of_day + timedelta(seconds=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            
+            st.success(f"✅ Berhasil menambahkan {added_count} data lembur!")
+            st.rerun()
     
-    if st.button("➕ TAMBAH DATA LEMBUR", type="primary"):
-        # Proses split per hari
-        d1 = datetime.combine(tgl_mulai, jam_mulai)
-        d2 = datetime.combine(tgl_selesai, jam_selesai)
-        
-        # Handle overnight
-        if d2 <= d1:
-            d2 += timedelta(days=1)
-        
-        current = d1
-        added_count = 0
-        
-        while current < d2:
-            end_of_day = current.replace(hour=23, minute=59, second=59, microsecond=999999)
-            segment_end = min(d2, end_of_day)
-            
-            hours = (segment_end - current).total_seconds() / 3600
-            minutes = ((segment_end - current).total_seconds() / 60) % 60
-            exact_hours = hours
-            
-            tipe = cek_tipe_hari(current, force_libur)
-            is_weekend = "Weekend" in tipe
-            
-            st.session_state.data_lembur.append({
-                "tanggal": current.strftime("%Y-%m-%d"),
-                "tipe": tipe,
-                "raw_jam": exact_hours,
-                "is_weekend": is_weekend
-            })
-            
-            added_count += 1
-            current = (end_of_day + timedelta(seconds=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        
-        st.success(f"✅ Berhasil menambahkan {added_count} data lembur!")
-        st.rerun()
-    
-    # Tabel Data Lembur
     st.markdown("---")
     st.subheader("📋 Data Lembur")
     
     if st.session_state.data_lembur:
-        # Tampilkan tabel
         table_data = []
         for i, d in enumerate(st.session_state.data_lembur):
             eff_jam = get_eff_jam(int(d['raw_jam']))
@@ -279,6 +312,7 @@ def show_gaji_calculator():
                 upah = calc_weekday(eff_jam, up_per_jam)
             
             table_data.append({
+                "Pilih": False,
                 "No": i + 1,
                 "Tanggal": d['tanggal'],
                 "Tipe": d['tipe'],
@@ -288,18 +322,43 @@ def show_gaji_calculator():
             })
         
         df_display = pd.DataFrame(table_data)
-        st.dataframe(df_display, use_container_width=True)
         
-        # Tombol hapus
-        col_del1, col_del2 = st.columns([3, 1])
+        edited_df = st.data_editor(
+            df_display,
+            column_config={
+                "Pilih": st.column_config.CheckboxColumn("Pilih", default=False),
+                "No": st.column_config.NumberColumn("No", disabled=True),
+                "Tanggal": st.column_config.TextColumn("Tanggal", disabled=True),
+                "Tipe": st.column_config.TextColumn("Tipe", disabled=True),
+                "Raw Jam": st.column_config.TextColumn("Raw Jam", disabled=True),
+                "Eff Jam": st.column_config.NumberColumn("Eff Jam", disabled=True),
+                "Upah": st.column_config.TextColumn("Upah", disabled=True),
+            },
+            hide_index=True,
+            use_container_width=True,
+            key="data_editor_lembur"
+        )
+        
+        col_del1, col_del2, col_del3 = st.columns([1, 1, 2])
+        
+        with col_del1:
+            if st.button("🗑️ Hapus yang Dipilih", type="secondary", use_container_width=True):
+                selected_indices = [i for i, row in edited_df.iterrows() if row['Pilih']]
+                if selected_indices:
+                    for idx in sorted(selected_indices, reverse=True):
+                        st.session_state.data_lembur.pop(idx)
+                    st.success(f"✅ Berhasil menghapus {len(selected_indices)} data!")
+                    st.rerun()
+                else:
+                    st.warning("Pilih data yang mau dihapus dulu!")
+        
         with col_del2:
-            if st.button("🗑️ Hapus Semua Data", type="secondary"):
+            if st.button("🗑️ Hapus Semua Data", type="secondary", use_container_width=True):
                 st.session_state.data_lembur = []
                 st.rerun()
     else:
         st.info("Belum ada data lembur. Silakan tambah data di atas.")
     
-    # Hitung Gaji
     st.markdown("---")
     col_btn1, col_btn2 = st.columns(2)
     
@@ -325,7 +384,6 @@ def show_gaji_calculator():
                     log_text += f"  Upah: Rp {upah:,.0f}\n"
                     log_text += "------------------------------------------\n"
                 
-                # Hitung BPJS
                 bpjs_kes = round(gaji_pokok * 0.01)
                 bpjs_jht = round(gaji_pokok * 0.02)
                 bpjs_jp = round(gaji_pokok * 0.01)
@@ -344,7 +402,6 @@ def show_gaji_calculator():
                 log_text += f"Total BPJS: Rp {total_bpjs:,.0f}\n"
                 log_text += f"Gaji Bersih: Rp {netto:,.0f}\n"
                 
-                # Tampilkan hasil
                 st.markdown("---")
                 st.subheader("📊 Hasil Perhitungan")
                 
@@ -393,7 +450,8 @@ def show_gaji_calculator():
                     label="📥 Download CSV",
                     data=csv_buffer,
                     file_name=f"gaji_lembur_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv"
+                    mime="text/csv",
+                    key="export_csv_btn"
                 )
 
 # --- FUNGSI TOOLS PDF ---
