@@ -402,16 +402,28 @@ def show_gaji_calculator():
                 log_text += f"Total BPJS: Rp {total_bpjs:,.0f}\n"
                 log_text += f"Gaji Bersih: Rp {netto:,.0f}\n"
                 
+                # TAMPILAN HASIL 1 KOLOM TAPI RAPI (PAKE EXPANDER BIAR GAK KEPOTONG)
                 st.markdown("---")
                 st.subheader("📊 Hasil Perhitungan")
                 
-                col_r1, col_r2, col_r3 = st.columns(3)
-                with col_r1:
-                    st.metric("Gaji Pokok", f"Rp {gaji_pokok:,.0f}")
-                with col_r2:
-                    st.metric("Total Lembur", f"Rp {total_lembur:,.0f}")
-                with col_r3:
-                    st.metric("Total BPJS", f"Rp {total_bpjs:,.0f}")
+                # Pakai container dengan border biar rapi
+                with st.container(border=True):
+                    col_r1, col_r2 = st.columns(2)
+                    with col_r1:
+                        st.markdown("### 💰 Gaji Pokok")
+                        st.markdown(f"<h2 style='color:#2ecc71;'>Rp {gaji_pokok:,.0f}</h2>", unsafe_allow_html=True)
+                        st.markdown("---")
+                        st.markdown("### 📊 Total BPJS")
+                        st.markdown(f"<h3 style='color:#e74c3c;'>Rp {total_bpjs:,.0f}</h3>", unsafe_allow_html=True)
+                        st.caption("BPJS Kes 1% + JHT 2% + JP 1%")
+                    
+                    with col_r2:
+                        st.markdown("### ⏱️ Total Lembur")
+                        st.markdown(f"<h2 style='color:#3498db;'>Rp {total_lembur:,.0f}</h2>", unsafe_allow_html=True)
+                        st.markdown("---")
+                        st.markdown("### 💵 POTONGAN")
+                        st.markdown(f"<h3 style='color:#e67e22;'>Rp {total_bpjs:,.0f}</h3>", unsafe_allow_html=True)
+                        st.caption("Total potongan BPJS")
                 
                 st.markdown("---")
                 st.success(f"**💰 TOTAL GAJI BERSIH: Rp {netto:,.0f}**")
