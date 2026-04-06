@@ -230,25 +230,22 @@ def show_overtime_calculator():
         ot_out = st.time_input("Selesai Lembur", value=datetime.strptime("08:00", "%H:%M").time())
 
     if st.button("Hitung Durasi (SUBMIT)", type="primary"):
-        def combine_dt(t_obj): 
-            return datetime.combine(tgl_lembur, t_obj)
+        # Buat datetime objects
+        dt_sched_in = datetime.combine(tgl_lembur, sched_in)
+        dt_sched_out = datetime.combine(tgl_lembur, sched_out)
+        dt_ot_in = datetime.combine(tgl_lembur, ot_in)
+        dt_ot_out = datetime.combine(tgl_lembur, ot_out)
         
-        dt_sched_in = combine_dt(sched_in)
-        dt_sched_out = combine_dt(sched_out)
-        dt_ot_in = combine_dt(ot_in)
-        dt_ot_out = combine_dt(ot_out)
-        
-        # Handle kasus melewati tengah malam
-        if dt_sched_out <= dt_sched_in: 
+        # Handle kasus melewati tengah malam untuk shift
+        if dt_sched_out <= dt_sched_in:
             dt_sched_out += timedelta(days=1)
-        if dt_ot_out <= dt_ot_in: 
+        
+        # Handle kasus lembur yang melewati tengah malam
+        # Jika jam selesai <= jam mulai, berarti lewat tengah malam
+        if dt_ot_out <= dt_ot_in:
             dt_ot_out += timedelta(days=1)
         
-        # Tambahan: Jika lembur mulai sebelum shift (00:00) dan selesai sebelum shift mulai
-        # Maka tambahkan 1 hari ke dt_ot_out agar perhitungan benar
-        if ot_in < sched_in and ot_out <= sched_in:
-            dt_ot_out += timedelta(days=1)
-
+        # LOGIKA CASE YANG BENAR
         dur_before = timedelta()
         dur_after = timedelta()
         break_before = timedelta()
@@ -262,68 +259,53 @@ def show_overtime_calculator():
             h = int(total_sec // 3600)
             m = int((total_sec % 3600) // 60)
             return f"{h} Jam {m} Menit"
-
+        
         if is_weekend:
+            # CASE 4: Weekend/Holiday - semua jam dihitung
             case_name = "CASE 4: Lembur di Hari Libur / Weekend"
             total_duration = dt_ot_out - dt_ot_in
-        else:
-            # ========== LOGIKA CASE YANG DIPERBAIKI ==========
             
-            # CASE 3: Lembur Sebelum Jam Kerja (Overnight / Dini Hari)
-            # Kondisi: Mulai lembur SEBELUM shift masuk DAN selesai lembur SEBELUM atau SAMA DENGAN shift masuk
-            if ot_out <= sched_in and ot_in <= sched_in:
+        else:
+            # CEK JENIS LEMBUR BERDASARKAN WAKTU
+            
+            # CASE 3: Lembur Sebelum Jam Kerja (Dini Hari)
+            # Kondisi: Mulai dan selesai sebelum shift masuk ATAU melewati tengah malam sampai sebelum shift
+            if dt_ot_out <= dt_sched_in:
                 case_name = f"CASE 3: Lembur Sebelum Jam Kerja (Overnight) - {ot_in.strftime('%H:%M')} s.d {ot_out.strftime('%H:%M')}"
-                # Lembur dihitung dari mulai sampai selesai (tanpa dipotong shift)
                 total_duration = dt_ot_out - dt_ot_in
                 
-            # CASE 1: Lembur Setelah Jam Kerja (Mulai SEBELUM jam pulang)
-            elif dt_ot_in < dt_sched_out:
-                case_name = f"CASE 1: Lembur Setelah Jam Kerja (Dimulai Sebelum {sched_out.strftime('%H:%M')})"
-                
-                # Hitung lembur sebelum jam pulang (jika mulai sebelum pulang)
-                if dt_ot_in < dt_sched_out:
-                    dur_before = dt_sched_out - dt_ot_in
-                # Hitung lembur setelah jam pulang
-                if dt_ot_out > dt_sched_out:
-                    dur_after = dt_ot_out - dt_sched_out
-                
-                total_duration = dur_before + dur_after
-                
-            # CASE 2: Lembur Setelah Jam Kerja (Mulai SETELAH jam pulang)
+            # CASE 1 & 2: Lembur setelah jam kerja
             elif dt_ot_in >= dt_sched_out:
-                if ot_out <= sched_in + timedelta(hours=24):
-                    # Masih di hari yang sama atau dini hari berikutnya
-                    dur_after = dt_ot_out - dt_ot_in
-                    case_name = f"CASE 2: Lembur Setelah Jam Kerja (Dimulai Setelah {sched_out.strftime('%H:%M')})"
-                else:
-                    dur_after = dt_ot_out - dt_sched_out
-                    break_after = dt_ot_in - dt_sched_out
-                    case_name = f"CASE 2: Lembur Setelah Jam Kerja (Dimulai Setelah {sched_out.strftime('%H:%M')})"
+                # CASE 2: Mulai setelah jam pulang
+                case_name = f"CASE 2: Lembur Setelah Jam Kerja (Dimulai Setelah {sched_out.strftime('%H:%M')})"
+                total_duration = dt_ot_out - dt_ot_in
                 
-                total_duration = dur_after
-            
+            elif dt_ot_in < dt_sched_out and dt_ot_out > dt_sched_out:
+                # CASE 1: Mulai sebelum jam pulang, selesai setelah jam pulang
+                case_name = f"CASE 1: Lembur Setelah Jam Kerja (Dimulai Sebelum {sched_out.strftime('%H:%M')})"
+                # Hitung lembur hanya dari jam pulang sampai selesai
+                total_duration = dt_ot_out - dt_sched_out
+                
             else:
                 # Fallback
                 total_duration = dt_ot_out - dt_ot_in
                 case_name = "CASE: Lembur Normal"
-
+        
+        # Pastikan durasi tidak negatif
         if total_duration.total_seconds() < 0:
             total_duration = timedelta()
-
+        
+        # Tampilkan hasil
         st.markdown("---")
         st.subheader("📊 Hasil Perhitungan")
         
         col_res1, col_res2 = st.columns(2)
         with col_res1:
-            if not is_weekend:
-                st.metric("Overtime Before Duration", format_td(dur_before))
-                st.metric("Break Before Duration", format_td(break_before))
-            else:
-                st.info(f"Mulai: **{ot_in.strftime('%H:%M')}** | Selesai: **{ot_out.strftime('%H:%M')}**")
+            st.metric("Waktu Mulai Lembur", ot_in.strftime('%H:%M'))
+            st.metric("Waktu Selesai Lembur", ot_out.strftime('%H:%M'))
         with col_res2:
-            st.metric("Overtime After Duration", format_td(dur_after))
-            if not is_weekend:
-                st.metric("Break After Duration", format_td(break_after))
+            st.metric("Shift Mulai", sched_in.strftime('%H:%M'))
+            st.metric("Shift Selesai", sched_out.strftime('%H:%M'))
         
         st.markdown("---")
         st.success(f"**TOTAL LEMBUR: {format_td(total_duration)}**")
