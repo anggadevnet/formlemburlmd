@@ -321,17 +321,32 @@ def show_login_page():
     st.title("🔒 Login Sistem Lembur")
     col1, col2, col3 = st.columns([1,2,1])
     with col2:
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        col_btn1, col_btn2 = st.columns(2)
-        with col_btn1:
-            if st.button("Login Admin", use_container_width=True):
+        role = st.radio("Pilih Tipe Login:", ["Admin", "Guest"])
+        
+        if role == "Admin":
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            if st.button("Login", use_container_width=True, type="primary"):
                 if username in users_db and users_db[username] == password:
-                    st.session_state.logged_in = True; st.session_state.role = "Admin"; st.session_state.username = username; st.rerun()
-                else: st.error("Username atau Password salah!")
-        with col_btn2:
-            if st.button("Login as Guest", use_container_width=True):
-                st.session_state.logged_in = True; st.session_state.role = "Guest"; st.session_state.username = "Guest"; st.rerun()
+                    st.session_state.logged_in = True
+                    st.session_state.role = "Admin"
+                    st.session_state.username = username
+                    st.rerun()
+                else:
+                    st.error("Username atau Password salah!")
+        
+        else:  # Guest
+            guest_password = st.text_input("Password Guest", type="password")
+            GUEST_PASSWORD = "rkb"  # Ganti password sesuai keinginan
+            
+            if st.button("Login as Guest", use_container_width=True, type="primary"):
+                if guest_password == GUEST_PASSWORD:
+                    st.session_state.logged_in = True
+                    st.session_state.role = "Guest"
+                    st.session_state.username = "Guest"
+                    st.rerun()
+                else:
+                    st.error("Password Guest salah!")
 
 # --- HALAMAN GUEST ---
 def show_guest_view():
